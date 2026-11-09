@@ -2,6 +2,9 @@
 name = "modelforge"
 version = "0.1.1"
 edition = "2024"
+description = "CLI en Rust para importar modelos GGUF desde HuggingFace, crearlos en Ollama, validarlos y enrutarlos en un gateway OpenAI-compatible."
+license = "MIT"
+repository = "https://github.com/atareao/modelforge"
 
 [dependencies]
 base64 = "0.22.1"

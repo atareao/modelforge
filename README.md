@@ -101,3 +101,7 @@ modelforge route local --model mi-modelo:q4_0 --config ./gateway.yaml
 - Plan: [`plans/PLAN-001.md`](plans/PLAN-001.md)
 - Especificación OpenSpec: [`openspec/specs/modelforge/spec.md`](openspec/specs/modelforge/spec.md)
 - Flujo Git: [`GIT_FLOW.md`](GIT_FLOW.md)
+
+## Licencia
+
+Este proyecto está bajo la licencia **MIT**. Consulta [`LICENSE`](LICENSE) para más detalles.
