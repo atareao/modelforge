@@ -7,6 +7,7 @@
 - PR #2 **fusionado** a `development`. Rama `feature/initial-plan` eliminada.
 - **Release v0.1.0 publicada**: PR #4 (`development` → `main`) fusionado; tag `v0.1.0` en `main`; release en GitHub.
 - Ramas: `main` (producción, v0.1.0) · `development` (integración).
+- **CI/CD configurado** (PR #6 → development): `.github/workflows/{ci,release-prepare,release}.yml`, `.vampus.yml`, `cliff.toml`, `GIT_FLOW.md`, `AGENTS.md`.
 - Incrementos 1–6: implementación funcional completa y verificada.
 - Auditoría Rust: ✅ aprobada.
 - Flujo e2e real verificado: import → create → test → bench → route → limpieza.
@@ -18,11 +19,17 @@
 
 ## Tarea pendiente
 
-- Ninguna. v0.1.0 publicada.
+- Configurar secretos en GitHub: `GH_PAT` (contents: write) y `CARGO_REGISTRY_TOKEN`.
+- (Opcional) Actualizar `README.md`: aún dice "Proyecto en planificación" y referencia `openspec/changes/modelforge/` (ya archivado).
 
 ## Siguiente paso sugerido
 
-- Añadir CI (`.github/workflows`: `cargo test`, `clippy`, `fmt`) y config de release (`cliff.toml` / `.vampus.yml`) si se quiere automatizar el versionado.
+- Al fusionar `development` → `main`, `release-prepare.yml` bumpa versión, genera `CHANGELOG.md`, crea tag y sincroniza `development` automáticamente.
+
+## Notas de CI
+
+- `ci.yml`: `fmt --check`, `clippy --all-targets -D warnings`, `test` en PR a `main`/`development`.
+- Se corrigió un `unused import` en `src/import.rs` (tests) detectado por el toolchain stable de CI pero no por el local (1.97.0).
 
 ## Verificación rápida
 
