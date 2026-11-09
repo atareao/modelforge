@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Importa modelos GGUF desde HuggingFace, créalos en Ollama y enrútalos en el gateway.
 ///
@@ -72,12 +72,27 @@ pub enum Command {
     Pull(PullArgs),
 }
 
+/// Backend con el que procesar un directorio de safetensors en `import`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum Backend {
+    /// Backend nativo de Ollama (por defecto; en Linux solo si el host lo soporta).
+    #[default]
+    Ollama,
+    /// Backend de llama.cpp: convierte safetensors → GGUF antes de crear en Ollama.
+    #[value(name = "llama.cpp")]
+    LlamaCpp,
+}
+
 /// Argumentos de `import`.
 #[derive(Debug, Args)]
 pub struct ImportArgs {
     /// Fuente: repo de HuggingFace (`org/model`), directorio local con
     /// `.safetensors` o referencia del hub (`hf.co/<repo>:<quant>`).
     pub source: String,
+
+    /// Backend de import para un directorio de safetensors (`ollama` o `llama.cpp`).
+    #[arg(long, value_name = "BACKEND", default_value = "ollama")]
+    pub backend: Backend,
 
     /// Quant a descargar de un repo GGUF (p. ej. `Q6_K`).
     #[arg(long, short = 'q', value_name = "QUANT")]
@@ -322,6 +337,43 @@ mod tests {
             }
             other => panic!("se esperaba Import, se obtuvo {other:?}"),
         }
+    }
+
+    /// Sin `--backend`, `import` usa el backend `ollama` por defecto.
+    #[test]
+    fn import_backend_defaults_to_ollama() {
+        let cli = Cli::try_parse_from(["modelforge", "import", "./modelo"]).expect("debe parsear");
+        match cli.command {
+            Command::Import(args) => assert_eq!(args.backend, Backend::Ollama),
+            other => panic!("se esperaba Import, se obtuvo {other:?}"),
+        }
+    }
+
+    /// `import` acepta `--backend llama.cpp`.
+    #[test]
+    fn import_accepts_llamacpp_backend() {
+        let cli = Cli::try_parse_from([
+            "modelforge",
+            "import",
+            "./modelo",
+            "--backend",
+            "llama.cpp",
+            "--name",
+            "mi-modelo",
+        ])
+        .expect("debe parsear");
+        match cli.command {
+            Command::Import(args) => assert_eq!(args.backend, Backend::LlamaCpp),
+            other => panic!("se esperaba Import, se obtuvo {other:?}"),
+        }
+    }
+
+    /// Un backend desconocido se rechaza al parsear.
+    #[test]
+    fn rejects_unknown_backend() {
+        assert!(
+            Cli::try_parse_from(["modelforge", "import", "./modelo", "--backend", "vllm"]).is_err()
+        );
     }
 
     /// `create` acepta `--quantize`.

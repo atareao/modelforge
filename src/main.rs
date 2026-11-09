@@ -3,6 +3,7 @@
 
 mod bench;
 mod cli;
+mod convert;
 mod create;
 mod error;
 mod format;
@@ -25,8 +26,8 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    BenchArgs, Cli, Command, CreateArgs, GlobalArgs, ImportArgs, InfoArgs, ListArgs, PullArgs,
-    RouteArgs, TestArgs,
+    Backend, BenchArgs, Cli, Command, CreateArgs, GlobalArgs, ImportArgs, InfoArgs, ListArgs,
+    PullArgs, RouteArgs, TestArgs,
 };
 use crate::error::AppError;
 use crate::source::SourceKind;
@@ -125,14 +126,39 @@ fn runtime() -> Result<tokio::runtime::Runtime, AppError> {
 fn run_import(args: &ImportArgs, global: &GlobalArgs) -> Result<(), AppError> {
     match SourceKind::detect(&args.source) {
         SourceKind::GgufRepo(repo) => {
+            reject_llamacpp_backend(args)?;
             reject_flags_for_gguf_import(args)?;
             import_gguf(&repo, args, global.json)
         }
         SourceKind::SafetensorsDir(dir) => {
             reject_flags_for_native_import(args)?;
-            import_native(&dir, args, global)
+            match args.backend {
+                Backend::LlamaCpp => import_llamacpp(&dir, args, global),
+                Backend::Ollama => import_native(&dir, args, global),
+            }
         }
-        SourceKind::HubRef(input) => Err(AppError::UsePull { input }),
+        SourceKind::HubRef(input) => {
+            reject_llamacpp_backend(args)?;
+            Err(AppError::UsePull { input })
+        }
+    }
+}
+
+/// Rechaza `--backend llama.cpp` para fuentes que no son un directorio de safetensors.
+///
+/// El backend de llama.cpp solo convierte snapshots locales de safetensors; un repo
+/// GGUF o una referencia del hub ya son GGUF, así que el flag no aplica.
+///
+/// # Errors
+///
+/// Devuelve [`AppError::LlamaCppUnsupportedSource`] si se usó `--backend llama.cpp`.
+fn reject_llamacpp_backend(args: &ImportArgs) -> Result<(), AppError> {
+    if args.backend == Backend::LlamaCpp {
+        Err(AppError::LlamaCppUnsupportedSource {
+            input: args.source.clone(),
+        })
+    } else {
+        Ok(())
     }
 }
 
@@ -235,6 +261,34 @@ fn import_native(
 
     let runtime = runtime()?;
     let report = runtime.block_on(create::run(&client, &options, &progress))?;
+
+    emit_create(&report, global.json)?;
+    Ok(())
+}
+
+/// Importa un directorio de safetensors convirtiéndolo a GGUF con llama.cpp.
+///
+/// Convierte el snapshot a un GGUF FP16 en un directorio temporal, lo cuantiza
+/// opcionalmente con `llama-quantize` y crea el modelo en Ollama a partir del GGUF
+/// resultante. Requiere `convert_hf_to_gguf.py` y `llama-quantize` en `PATH`.
+fn import_llamacpp(
+    dir: &std::path::Path,
+    args: &ImportArgs,
+    global: &GlobalArgs,
+) -> Result<(), AppError> {
+    let name = args.name.clone().ok_or(AppError::MissingName)?;
+    let client = ollama::OllamaHttpClient::new(global.ollama.clone())?;
+    let converter = convert::LlamaCppConverter::new();
+    let options = convert::ConvertOptions {
+        name: &name,
+        source_dir: dir,
+        quantize: args.quantize.as_deref(),
+        tmp_root: None,
+    };
+    let progress = CliProgress { json: global.json };
+
+    let runtime = runtime()?;
+    let report = runtime.block_on(convert::run(&client, &converter, &options, &progress))?;
 
     emit_create(&report, global.json)?;
     Ok(())
@@ -391,7 +445,11 @@ fn emit_create(result: &create::CreateReport, json: bool) -> Result<(), AppError
         Some(ctx) => println!("num_ctx: {ctx}"),
         None => println!("num_ctx: (no reportado)"),
     }
-    println!("Modelfile:\n{}", result.modelfile);
+    // El flujo de llama.cpp omite el Modelfile (apuntaría a un GGUF temporal ya
+    // eliminado); solo se imprime cuando hay uno reproducible.
+    if !result.modelfile.is_empty() {
+        println!("Modelfile:\n{}", result.modelfile);
+    }
     Ok(())
 }
 
@@ -605,5 +663,61 @@ fn report(err: &AppError, json: bool) {
         println!("{}", err.to_json());
     } else {
         eprintln!("error: {err}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `ImportArgs` de un directorio de safetensors con `--backend llama.cpp`.
+    fn llamacpp_import() -> ImportArgs {
+        ImportArgs {
+            source: "./modelo".to_string(),
+            backend: Backend::LlamaCpp,
+            quant: None,
+            name: Some("mi-modelo".to_string()),
+            quantize: None,
+            mmproj: false,
+            dest: None,
+        }
+    }
+
+    /// Aplica `set_flag` sobre un `ImportArgs` de llama.cpp y verifica que el flag se
+    /// rechaza, nombrando `expected`.
+    fn assert_flag_rejected(set_flag: impl FnOnce(&mut ImportArgs), expected: &str) {
+        let mut args = llamacpp_import();
+        set_flag(&mut args);
+
+        let err = reject_flags_for_native_import(&args).expect_err("debe rechazar el flag");
+
+        match err {
+            AppError::NativeImportUnsupportedFlags { flags } => {
+                assert!(
+                    flags.iter().any(|flag| flag == expected),
+                    "el error debe listar `{expected}`: {flags:?}"
+                );
+            }
+            other => panic!("se esperaba NativeImportUnsupportedFlags, se obtuvo {other:?}"),
+        }
+    }
+
+    /// `--backend llama.cpp` rechaza los flags que solo valen para el import de repos
+    /// GGUF (`--quant`, `--dest`, `--mmproj`), en lugar de ignorarlos en silencio.
+    #[test]
+    fn llamacpp_backend_rejects_gguf_only_flags() {
+        assert_flag_rejected(|args| args.quant = Some("Q4_K_M".to_string()), "--quant");
+        assert_flag_rejected(|args| args.mmproj = true, "--mmproj");
+        assert_flag_rejected(
+            |args| args.dest = Some(PathBuf::from("/tmp/salida")),
+            "--dest",
+        );
+    }
+
+    /// Sin flags ajenos, el import nativo de safetensors no se rechaza.
+    #[test]
+    fn llamacpp_backend_accepts_pure_source() {
+        let args = llamacpp_import();
+        assert!(reject_flags_for_native_import(&args).is_ok());
     }
 }
