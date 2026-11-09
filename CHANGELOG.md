@@ -1,4 +1,16 @@
 # Changelog
+## [0.1.2] - 2026-11-09
+
+### Documentation
+
+- *(handoff)* Release v0.1.1 automática validada
+- *(license)* Añadir licencia MIT y metadatos del paquete
+- *(handoff)* Licencia MIT y fix de Cargo.lock
+- *(plans)* Archivar PLAN-001 tras completar la feature
+
+### Miscellaneous Tasks
+
+- *(release)* Sincronizar Cargo.lock tras el bump de vampus
 ## [0.1.1] - 2026-11-09
 
 ### Bug Fixes
@@ -15,6 +27,7 @@
 
 - Workflows de CI y release + config gitflow (cliff, vampus, GIT_FLOW)
 - *(release)* Quitar job publish a crates.io (nombre ocupado)
+- Release v0.1.1
 ## [0.1.0] - 2026-11-09
 
 ### Documentation
