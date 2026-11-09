@@ -53,7 +53,8 @@ pub struct GlobalArgs {
 /// Subcomandos disponibles.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Descarga un GGUF (y su mmproj) desde HuggingFace.
+    /// Importa un modelo: descarga un GGUF de HuggingFace o importa de forma nativa
+    /// un directorio local con `.safetensors`.
     Import(ImportArgs),
     /// Crea un modelo en Ollama a partir de un Modelfile.
     Create(CreateArgs),
@@ -67,17 +68,28 @@ pub enum Command {
     Info(InfoArgs),
     /// Añade una ruta del modelo al `gateway.yaml`.
     Route(RouteArgs),
+    /// Descarga un GGUF del hub delegando en Ollama (`hf.co/<repo>:<quant>`).
+    Pull(PullArgs),
 }
 
 /// Argumentos de `import`.
 #[derive(Debug, Args)]
 pub struct ImportArgs {
-    /// Repo de HuggingFace en formato `org/model`.
-    pub repo: String,
+    /// Fuente: repo de HuggingFace (`org/model`), directorio local con
+    /// `.safetensors` o referencia del hub (`hf.co/<repo>:<quant>`).
+    pub source: String,
 
-    /// Quant a descargar (p. ej. `Q6_K`).
+    /// Quant a descargar de un repo GGUF (p. ej. `Q6_K`).
     #[arg(long, short = 'q', value_name = "QUANT")]
     pub quant: Option<String>,
+
+    /// Nombre del modelo a crear en Ollama (import nativo de safetensors).
+    #[arg(long, value_name = "MODEL")]
+    pub name: Option<String>,
+
+    /// Cuantización nativa de Ollama a aplicar al crear (p. ej. `nvfp4`).
+    #[arg(long, value_name = "QUANT")]
+    pub quantize: Option<String>,
 
     /// Descarga también el `mmproj` (proyector de visión).
     #[arg(long)]
@@ -94,11 +106,11 @@ pub struct CreateArgs {
     /// Nombre del modelo a crear en Ollama.
     pub name: String,
 
-    /// Fichero GGUF de origen (`FROM`).
-    #[arg(long, value_name = "GGUF")]
+    /// Fichero GGUF o directorio de safetensors de origen (`FROM`).
+    #[arg(long, value_name = "PATH")]
     pub from: Option<PathBuf>,
 
-    /// Fichero `mmproj` para visión.
+    /// Proyector de visión para el modelo (`mmproj`).
     #[arg(long, value_name = "MMPROJ")]
     pub mmproj: Option<PathBuf>,
 
@@ -113,6 +125,10 @@ pub struct CreateArgs {
     /// Parser del Modelfile (`PARSER`).
     #[arg(long, value_name = "NAME")]
     pub parser: Option<String>,
+
+    /// Cuantización nativa de Ollama a aplicar en la creación de safetensors (p. ej. `nvfp4`).
+    #[arg(long, value_name = "QUANT")]
+    pub quantize: Option<String>,
 }
 
 /// Argumentos de `test`.
@@ -183,6 +199,13 @@ pub struct RouteArgs {
     pub dry_run: bool,
 }
 
+/// Argumentos de `pull`.
+#[derive(Debug, Args)]
+pub struct PullArgs {
+    /// Referencia `hf.co/<repo>:<quant>` (p. ej. `hf.co/usuario/modelo:Q4_K_M`).
+    pub reference: String,
+}
+
 impl Command {
     /// Nombre canónico del subcomando, usado en mensajes de error.
     #[must_use]
@@ -195,6 +218,7 @@ impl Command {
             Command::List(_) => "list",
             Command::Info(_) => "info",
             Command::Route(_) => "route",
+            Command::Pull(_) => "pull",
         }
     }
 }
@@ -253,7 +277,7 @@ mod tests {
     /// Existen todos los subcomandos exigidos por el spec.
     #[test]
     fn recognizes_all_subcommands() {
-        let cases: [(&[&str], &str); 7] = [
+        let cases: [(&[&str], &str); 8] = [
             (&["modelforge", "import", "org/repo"], "import"),
             (&["modelforge", "create", "model"], "create"),
             (&["modelforge", "test", "model"], "test"),
@@ -261,6 +285,7 @@ mod tests {
             (&["modelforge", "list"], "list"),
             (&["modelforge", "info", "model"], "info"),
             (&["modelforge", "route", "model"], "route"),
+            (&["modelforge", "pull", "hf.co/usuario/repo:Q4_K_M"], "pull"),
         ];
 
         for (argv, expected) in cases {
@@ -271,6 +296,51 @@ mod tests {
                 expected,
                 "subcomando incorrecto en {argv:?}"
             );
+        }
+    }
+
+    /// `import` acepta `--name` y `--quantize` además de `--quant`.
+    #[test]
+    fn import_accepts_native_flags() {
+        let cli = Cli::try_parse_from([
+            "modelforge",
+            "import",
+            "./modelo",
+            "--name",
+            "mi-modelo",
+            "--quantize",
+            "nvfp4",
+        ])
+        .expect("debe parsear");
+
+        match cli.command {
+            Command::Import(args) => {
+                assert_eq!(args.source, "./modelo");
+                assert_eq!(args.name.as_deref(), Some("mi-modelo"));
+                assert_eq!(args.quantize.as_deref(), Some("nvfp4"));
+                assert_eq!(args.quant, None);
+            }
+            other => panic!("se esperaba Import, se obtuvo {other:?}"),
+        }
+    }
+
+    /// `create` acepta `--quantize`.
+    #[test]
+    fn create_accepts_quantize_flag() {
+        let cli = Cli::try_parse_from([
+            "modelforge",
+            "create",
+            "m",
+            "--from",
+            "./modelo",
+            "--quantize",
+            "mxfp4",
+        ])
+        .expect("debe parsear");
+
+        match cli.command {
+            Command::Create(args) => assert_eq!(args.quantize.as_deref(), Some("mxfp4")),
+            other => panic!("se esperaba Create, se obtuvo {other:?}"),
         }
     }
 
@@ -291,7 +361,9 @@ mod tests {
     #[test]
     fn help_lists_subcommands_and_flags() {
         let help = Cli::command().render_help().to_string();
-        for name in ["import", "create", "test", "bench", "list", "info", "route"] {
+        for name in [
+            "import", "create", "test", "bench", "list", "info", "route", "pull",
+        ] {
             assert!(help.contains(name), "la ayuda debe mencionar `{name}`");
         }
         for flag in ["--config", "--ollama", "--json", "--verbose"] {
