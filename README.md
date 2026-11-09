@@ -98,7 +98,7 @@ modelforge route local --model mi-modelo:q4_0 --config ./gateway.yaml
 ## Documentación
 
 - Guía de uso: [`docs/modelforge.md`](docs/modelforge.md)
-- Plan: [`plans/PLAN-001.md`](plans/PLAN-001.md)
+- Plan: [`plans/PLAN-001-ARCHIVED.md`](plans/PLAN-001-ARCHIVED.md)
 - Especificación OpenSpec: [`openspec/specs/modelforge/spec.md`](openspec/specs/modelforge/spec.md)
 - Flujo Git: [`GIT_FLOW.md`](GIT_FLOW.md)
 
