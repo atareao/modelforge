@@ -17,7 +17,7 @@
 - `cargo clippy --all-targets -- -D warnings` limpio.
 - `cargo fmt --check` limpio.
 - OpenSpec: change `modelforge` archivado en `openspec/changes/archive/2026-11-09-modelforge/`; spec fusionada en `openspec/specs/modelforge/spec.md` (`openspec validate modelforge --strict`).
-- Plan: `plans/PLAN-001.md` (completado).
+- Plan: `plans/PLAN-001-ARCHIVED.md` (completado).
 
 ## Tarea pendiente
 
