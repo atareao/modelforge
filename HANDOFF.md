@@ -4,22 +4,24 @@
 
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
 - Issue #1: https://github.com/atareao/modelforge/issues/1
-- PR #2 abierto a `development`: https://github.com/atareao/modelforge/pull/2
-- Rama actual: `feature/initial-plan`
+- PR #2 **fusionado** a `development` (fast-forward, `966e61a`). Rama `feature/initial-plan` eliminada.
+- Rama actual: `development`.
 - Incrementos 1–6: implementación funcional completa y verificada.
 - Auditoría Rust: ✅ aprobada.
 - Flujo e2e real verificado: import → create → test → bench → route → limpieza.
 - Suite: 119 tests passing (los de red/Ollama real van `#[ignore]`).
 - `cargo clippy --all-targets -- -D warnings` limpio.
 - `cargo fmt --check` limpio.
-- OpenSpec: `openspec/changes/modelforge/` válido (`openspec validate modelforge --strict`).
+- OpenSpec: change `modelforge` archivado en `openspec/changes/archive/2026-11-09-modelforge/`; spec fusionada en `openspec/specs/modelforge/spec.md` (`openspec validate modelforge --strict`).
 - Plan: `plans/PLAN-001.md` (completado).
 
 ## Tarea pendiente
 
-- (a) Commit de los incrementos 2–6 (todo sin commitear en la rama `feature/initial-plan`).
-- (b) Decidir si se archiva el change con `openspec archive modelforge`.
-- (c) PR #2 a `development`.
+- Ninguna. Feature cerrada en `development`.
+
+## Siguiente paso sugerido
+
+- Preparar release: PR `development` → `main` (v0.1.0) cuando el usuario lo decida.
 
 ## Verificación rápida
 
