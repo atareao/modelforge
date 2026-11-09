@@ -41,7 +41,9 @@ pub struct CreateOptions<'a> {
 pub struct CreateReport {
     /// Nombre del modelo creado.
     pub model: String,
-    /// Modelfile generado (formato Ollama).
+    /// Modelfile generado (formato Ollama). Vacío en el flujo llama.cpp,
+    /// por lo que se omite del JSON para no emitir `"modelfile":""`.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub modelfile: String,
     /// Digests de los blobs usados (nombre de fichero → digest).
     pub blobs: BTreeMap<String, String>,
@@ -54,9 +56,11 @@ pub struct CreateReport {
 /// Etapas de progreso que [`run`] notifica al llamante, en orden real de ocurrencia.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
+    /// Conversión de safetensors a GGUF con llama.cpp (`--backend llama.cpp`).
+    ConvertingSafetensors,
     /// Preparación del origen: se recoge el snapshot nativo y se suben sus blobs.
     Converting,
-    /// Cuantización durante la creación (`--quantize`).
+    /// Cuantización durante la creación (`--quantize`) o con `llama-quantize`.
     Quantizing,
     /// Creación del modelo en Ollama (`POST /api/create`).
     Creating,
@@ -67,6 +71,7 @@ impl Stage {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
+            Stage::ConvertingSafetensors => "conversión",
             Stage::Converting => "conversión interna",
             Stage::Quantizing => "cuantización",
             Stage::Creating => "creación",
@@ -905,6 +910,30 @@ mod tests {
         assert!(
             err.to_string().contains("no soportada"),
             "el error de Ollama debe propagarse tal cual: {err}"
+        );
+    }
+
+    #[test]
+    fn report_omits_empty_modelfile_but_keeps_it_when_present() {
+        let mut report = CreateReport {
+            model: "llama-cpp".to_string(),
+            modelfile: String::new(),
+            blobs: BTreeMap::new(),
+            quantize: None,
+            info: ModelInfo::default(),
+        };
+
+        let json = serde_json::to_string(&report).expect("serializa");
+        assert!(
+            !json.contains("\"modelfile\""),
+            "el flujo llama.cpp no debe emitir `modelfile`: {json}"
+        );
+
+        report.modelfile = "FROM /tmp/model.gguf\n".to_string();
+        let json = serde_json::to_string(&report).expect("serializa");
+        assert!(
+            json.contains("\"modelfile\":\"FROM /tmp/model.gguf\\n\""),
+            "el import nativo debe seguir emitiendo `modelfile`: {json}"
         );
     }
 }

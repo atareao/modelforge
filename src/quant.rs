@@ -61,6 +61,36 @@ pub fn supported_quantize_values() -> Vec<String> {
         .collect()
 }
 
+/// Cuantizaciones (GGUF) que acepta `llama-quantize`.
+///
+/// Es una lista **propia** de llama.cpp, distinta de [`SUPPORTED_QUANTIZE`] (los
+/// tipos nativos de Ollama): aquí van los `Q*_K*`, `Q*_0`, `IQ*` y `MXFP4` que
+/// produce `llama-quantize <in> <out> <TYPE>`. La comparación es **sin distinguir
+/// mayúsculas/minúsculas** y el valor se canonicaliza a mayúsculas.
+pub const SUPPORTED_LLAMACPP_QUANTS: &[&str] = &[
+    "Q2_K", "Q3_K_S", "Q3_K_M", "Q3_K_L", "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M", "Q5_0", "Q5_1",
+    "Q5_K_S", "Q5_K_M", "Q6_K", "Q8_0", "IQ4_NL", "IQ4_XS", "MXFP4",
+];
+
+/// Devuelve la forma canónica (mayúsculas) de `value` si es un quant de llama.cpp
+/// soportado; `None` en caso contrario.
+#[must_use]
+pub fn canonical_llamacpp_quant(value: &str) -> Option<String> {
+    SUPPORTED_LLAMACPP_QUANTS
+        .iter()
+        .find(|quant| quant.eq_ignore_ascii_case(value))
+        .map(|quant| (*quant).to_string())
+}
+
+/// Lista de quants de llama.cpp soportados, para mensajes de error.
+#[must_use]
+pub fn supported_llamacpp_quants_values() -> Vec<String> {
+    SUPPORTED_LLAMACPP_QUANTS
+        .iter()
+        .map(|quant| (*quant).to_string())
+        .collect()
+}
+
 /// Selecciona el GGUF del quant pedido y, opcionalmente, su `mmproj`.
 ///
 /// # Errors
@@ -323,5 +353,49 @@ mod tests {
                 "mxfp8".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn canonical_llamacpp_quant_accepts_common_values() {
+        for value in ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"] {
+            assert_eq!(
+                canonical_llamacpp_quant(value).as_deref(),
+                Some(value),
+                "{value} debe aceptarse"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_llamacpp_quant_normalizes_case_to_uppercase() {
+        assert_eq!(
+            canonical_llamacpp_quant("q4_k_m").as_deref(),
+            Some("Q4_K_M")
+        );
+        assert_eq!(canonical_llamacpp_quant("Q6_k").as_deref(), Some("Q6_K"));
+        assert_eq!(canonical_llamacpp_quant("q8_0").as_deref(), Some("Q8_0"));
+    }
+
+    #[test]
+    fn canonical_llamacpp_quant_rejects_native_ollama_values_and_unknown() {
+        // Los quants nativos de Ollama NO valen para `--backend llama.cpp`.
+        for value in ["nvfp4", "int4", "mxfp8", "F16", "NO_EXISTE", ""] {
+            assert_eq!(
+                canonical_llamacpp_quant(value),
+                None,
+                "{value} no debe aceptarse"
+            );
+        }
+    }
+
+    #[test]
+    fn supported_llamacpp_quants_values_lists_expected() {
+        let values = supported_llamacpp_quants_values();
+        for expected in ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0"] {
+            assert!(
+                values.iter().any(|v| v == expected),
+                "falta {expected} en {values:?}"
+            );
+        }
     }
 }
