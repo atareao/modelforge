@@ -1,4 +1,15 @@
 # Changelog
+## [0.3.0] - 2026-11-09
+
+### Documentation
+
+- *(handoff)* Estado tras el release v0.2.0 y la feature de import nativo (#8)
+- *(spec)* Propuesta PLAN-003 y change OpenSpec llamacpp-bridge (#24)
+- *(llamacpp-bridge)* Archivar spec OpenSpec y plan tras la feature (#24)
+
+### Features
+
+- *(llamacpp-bridge)* Import de safetensors vía llama.cpp con --backend (#24)
 ## [0.2.0] - 2026-11-09
 
 ### Documentation
@@ -15,6 +26,7 @@
 
 - Release v0.1.3
 - *(release)* Detectar feat con prefijo gitmoji y revertir versión a 0.1.2
+- Release v0.2.0
 ## [0.1.2] - 2026-11-09
 
 ### Documentation
