@@ -2,7 +2,7 @@
 
 - **Repositorio:** atareao/modelforge
 - **Issue:** #1
-- **Estado:** planificado
+- **Estado:** completado
 - **Objetivo:** CLI independiente `modelforge` para importar modelos GGUF de HuggingFace, crear el modelo en Ollama, validarlo y añadir la ruta al gateway.
 
 ## Alcance
@@ -12,27 +12,27 @@
 
 ## Tareas
 
-- [ ] 1.1 Crear el proyecto `modelforge` y verificar `cargo check`.
-- [ ] 1.2 Añadir dependencias y verificar `cargo check`.
-- [ ] 1.3 Configurar `--config`, `--ollama`, `--json`, `--verbose` y verificar `--help`.
-- [ ] 2.1 Implementar `import` y verificar descarga real.
-- [ ] 2.2 Implementar reanudación y verificar.
-- [ ] 2.3 Filtro de quant y error claro, con test.
-- [ ] 2.4 Documentar `import`.
-- [ ] 3.1 Generar Modelfile, con test.
-- [ ] 3.2 Crear vía `/api/create` y verificar con `ollama show`.
-- [ ] 3.3 Ollama no disponible, con test de integración.
-- [ ] 3.4 Documentar `create`.
-- [ ] 4.1 `test` con texto, thinking, tools y vision.
-- [ ] 4.2 `bench` con métricas, con test de integración.
-- [ ] 4.3 `--compare` y tabla comparativa.
-- [ ] 4.4 Documentar `test`/`bench`.
-- [ ] 5.1 `list` e `info`, con test de integración.
-- [ ] 5.2 `route` con `serde_yaml`, backup y sin duplicados, con test.
-- [ ] 5.3 Documentar `route`.
-- [ ] 6.1 Flujo completo real y verificar.
-- [ ] 6.2 Revisar `docs/modelforge.md` y verificar.
-- [ ] 6.3 `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`.
+- [x] 1.1 Crear el proyecto `modelforge` y verificar `cargo check`.
+- [x] 1.2 Añadir dependencias y verificar `cargo check`.
+- [x] 1.3 Configurar `--config`, `--ollama`, `--json`, `--verbose` y verificar `--help`.
+- [x] 2.1 Implementar `import` y verificar descarga real.
+- [x] 2.2 Implementar reanudación y verificar.
+- [x] 2.3 Filtro de quant y error claro, con test.
+- [x] 2.4 Documentar `import`.
+- [x] 3.1 Generar Modelfile, con test.
+- [x] 3.2 Crear vía `/api/create` y verificar con `ollama show`.
+- [x] 3.3 Ollama no disponible, con test de integración.
+- [x] 3.4 Documentar `create`.
+- [x] 4.1 `test` con texto, thinking, tools y vision.
+- [x] 4.2 `bench` con métricas, con test de integración.
+- [x] 4.3 `--compare` y tabla comparativa.
+- [x] 4.4 Documentar `test`/`bench`.
+- [x] 5.1 `list` e `info`, con test de integración.
+- [x] 5.2 `route` con `serde_yaml`, backup y sin duplicados, con test.
+- [x] 5.3 Documentar `route`.
+- [x] 6.1 Flujo completo real y verificar.
+- [x] 6.2 Revisar `docs/modelforge.md` y verificar.
+- [x] 6.3 `cargo test`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`.
 
 ## Verificación
 
