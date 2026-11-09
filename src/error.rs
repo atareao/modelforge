@@ -92,7 +92,8 @@ pub enum AppError {
         path: String,
     },
 
-    /// El valor de `--quantize` no es una cuantización soportada por Ollama.
+    /// El valor de `--quantize` no es una cuantización soportada (por Ollama o, con
+    /// `--backend llama.cpp`, por `llama-quantize`).
     #[error(
         "cuantización `{value}` no soportada; valores válidos: {}",
         supported_quantize(.supported)
@@ -100,7 +101,7 @@ pub enum AppError {
     UnsupportedQuantize {
         /// Valor introducido por el usuario.
         value: String,
-        /// Valores soportados por Ollama.
+        /// Valores soportados por el flujo en curso (nativos de Ollama o de llama.cpp).
         supported: Vec<String>,
     },
 
@@ -143,6 +144,37 @@ pub enum AppError {
     )]
     InvalidHubRef {
         /// Valor introducido por el usuario.
+        input: String,
+    },
+
+    /// No se encontró una herramienta de llama.cpp en `PATH`.
+    #[error(
+        "no se encontró `{tool}` en `PATH`: instala llama.cpp (o `llama.cpp` desde \
+         https://github.com/ggml-org/llama.cpp) y Python 3, y asegúrate de que `{tool}` \
+         está en el `PATH`; no se instala nada automáticamente"
+    )]
+    ConverterToolMissing {
+        /// Nombre de la herramienta ausente (p. ej. `convert_hf_to_gguf.py`).
+        tool: String,
+    },
+
+    /// Una herramienta externa de llama.cpp terminó con error.
+    #[error("`{tool}` falló: {message}")]
+    ConverterFailed {
+        /// Herramienta que falló (p. ej. `llama-quantize`).
+        tool: String,
+        /// Detalle del fallo: código de salida, `stderr` y, si lo hay, `stdout`
+        /// (ambos recogidos por `check_status`).
+        message: String,
+    },
+
+    /// Se pidió `--backend llama.cpp` con una fuente que no es un directorio de safetensors.
+    #[error(
+        "`--backend llama.cpp` solo aplica a un directorio local de safetensors; `{input}` no lo es \
+         (para un repo GGUF usa `--quant <QUANT>`, p. ej. `--quant Q4_K_M`)"
+    )]
+    LlamaCppUnsupportedSource {
+        /// Fuente introducida por el usuario.
         input: String,
     },
 
@@ -321,5 +353,37 @@ mod tests {
             input: "usuario/repo:Q4_K_M".into(),
         };
         assert!(err.to_string().contains("hf.co/<repo>:<quant>"));
+    }
+
+    #[test]
+    fn converter_tool_missing_is_actionable() {
+        let err = AppError::ConverterToolMissing {
+            tool: "llama-quantize".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("llama-quantize"), "{msg}");
+        assert!(msg.contains("PATH"), "{msg}");
+        assert!(msg.contains("llama.cpp"), "{msg}");
+    }
+
+    #[test]
+    fn converter_failed_reports_tool_and_detail() {
+        let err = AppError::ConverterFailed {
+            tool: "convert_hf_to_gguf.py".into(),
+            message: "código 1: boom".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("convert_hf_to_gguf.py"), "{msg}");
+        assert!(msg.contains("boom"), "{msg}");
+    }
+
+    #[test]
+    fn llamacpp_unsupported_source_explains_scope() {
+        let err = AppError::LlamaCppUnsupportedSource {
+            input: "org/model".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("llama.cpp"), "{msg}");
+        assert!(msg.contains("safetensors"), "{msg}");
     }
 }
