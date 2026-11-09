@@ -5,9 +5,11 @@
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
 - Issue #1: https://github.com/atareao/modelforge/issues/1
 - PR #2 **fusionado** a `development`. Rama `feature/initial-plan` eliminada.
-- **Release v0.1.0 publicada**: PR #4 (`development` → `main`) fusionado; tag `v0.1.0` en `main`; release en GitHub.
-- Ramas: `main` (producción, v0.1.0) · `development` (integración).
-- **CI/CD configurado** (PR #6 → development): `.github/workflows/{ci,release-prepare,release}.yml`, `.vampus.yml`, `cliff.toml`, `GIT_FLOW.md`, `AGENTS.md`.
+- **Release v0.1.1 publicada automáticamente**: PR #11 (`development` → `main`) → `release-prepare.yml` bumpó 0.1.0→0.1.1, generó `CHANGELOG.md`, tag `v0.1.1` y sincronizó `development`; `release.yml` compiló binarios x86_64/aarch64 y creó la GitHub Release.
+- Ramas: `main` (producción, v0.1.1) · `development` (integración). `development` == `main`.
+- **CI/CD configurado**: `.github/workflows/{ci,release-prepare,release}.yml`, `.vampus.yml`, `cliff.toml`, `GIT_FLOW.md`, `AGENTS.md`.
+- Secretos `GH_PAT` y `CARGO_REGISTRY_TOKEN` configurados en el repo.
+- El job `publish` a crates.io se eliminó (el nombre `modelforge` ya está ocupado en crates.io).
 - Incrementos 1–6: implementación funcional completa y verificada.
 - Auditoría Rust: ✅ aprobada.
 - Flujo e2e real verificado: import → create → test → bench → route → limpieza.
@@ -19,12 +21,11 @@
 
 ## Tarea pendiente
 
-- Configurar secretos en GitHub: `GH_PAT` (contents: write) y `CARGO_REGISTRY_TOKEN`.
-- (Opcional) Actualizar `README.md`: aún dice "Proyecto en planificación" y referencia `openspec/changes/modelforge/` (ya archivado).
+- Ninguna. Flujo de release automático validado de extremo a extremo.
 
 ## Siguiente paso sugerido
 
-- Al fusionar `development` → `main`, `release-prepare.yml` bumpa versión, genera `CHANGELOG.md`, crea tag y sincroniza `development` automáticamente.
+- Añadir `description`/`license` a `Cargo.toml` (hoy ausentes) para higiene del paquete.
 
 ## Notas de CI
 
