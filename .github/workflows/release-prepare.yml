@@ -40,6 +40,8 @@ jobs:
           fi
       - name: Bump version with vampus
         run: vampus upgrade ${{ steps.bump.outputs.type }}
+      - name: Sync Cargo.lock
+        run: cargo update -p modelforge
       - name: Get new version
         id: version
         run: |
