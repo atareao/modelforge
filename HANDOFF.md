@@ -23,9 +23,8 @@
 
 - Ninguna. Flujo de release automático validado de extremo a extremo.
 
-## Siguiente paso sugerido
-
-- Añadir `description`/`license` a `Cargo.toml` (hoy ausentes) para higiene del paquete.
+- Licencia **MIT** añadida (`LICENSE`, Copyright © 2026 Lorenzo Carbonell) + `description`/`license`/`repository` en `Cargo.toml`.
+- `Cargo.lock` sincronizado y `release-prepare.yml` corregido (`cargo update -p modelforge` tras el bump).
 
 ## Notas de CI
 
