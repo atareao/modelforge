@@ -114,6 +114,18 @@ pub struct CreateModelRequest {
     pub parser: String,
     /// Parámetros del modelo (valores tipados).
     pub parameters: BTreeMap<String, serde_json::Value>,
+    /// Cuantización nativa de Ollama a aplicar (p. ej. `nvfp4`); opcional.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quantize: Option<String>,
+    /// Desactiva el *streaming* de la respuesta.
+    pub stream: bool,
+}
+
+/// Petición de descarga de un modelo del hub (`POST /api/pull`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PullRequest {
+    /// Nombre del modelo tal cual lo entiende Ollama (`hf.co/<repo>:<quant>`).
+    pub name: String,
     /// Desactiva el *streaming* de la respuesta.
     pub stream: bool,
 }
@@ -141,6 +153,9 @@ pub trait OllamaClient {
         &self,
         request: &CreateModelRequest,
     ) -> impl Future<Output = Result<(), AppError>> + Send;
+
+    /// Descarga un modelo del hub vía `/api/pull` y devuelve el estado reportado.
+    fn pull(&self, request: &PullRequest) -> impl Future<Output = Result<String, AppError>> + Send;
 
     /// Devuelve la información de `model` vía `/api/show`.
     fn show(&self, model: &str) -> impl Future<Output = Result<ModelInfo, AppError>> + Send;
@@ -458,6 +473,15 @@ struct CreateResponse {
     error: Option<String>,
 }
 
+/// Respuesta de `/api/pull` (una línea de estado o el objeto final).
+#[derive(Debug, Deserialize)]
+struct PullResponse {
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
 /// Cuerpo de la petición a `/api/show`.
 #[derive(Debug, Serialize)]
 struct ShowRequest {
@@ -601,19 +625,74 @@ impl OllamaClient for OllamaHttpClient {
                 .map_err(|err| self.unavailable(err))?;
 
             let status = response.status();
+            let body = response.text().await.map_err(|err| AppError::Ollama {
+                message: err.to_string(),
+            })?;
+
+            // En respuestas de error se incluye el cuerpo de Ollama: suele traer el
+            // motivo real (p. ej. `unsupported quantize type "…"`).
             if !status.is_success() {
                 return Err(AppError::Ollama {
-                    message: format!("POST /api/create devolvió {status}"),
+                    message: format!("POST /api/create devolvió {status}: {body}"),
                 });
             }
 
-            let body: CreateResponse = response.json().await.map_err(|err| AppError::Ollama {
-                message: err.to_string(),
-            })?;
-            if let Some(error) = body.error {
+            // Con `stream: false` Ollama devuelve un objeto final, pero algunos
+            // servidores emiten varias líneas JSON; se acepta la última no vacía.
+            let line = body
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("");
+            let parsed: CreateResponse =
+                serde_json::from_str(line).map_err(|err| AppError::Ollama {
+                    message: err.to_string(),
+                })?;
+            if let Some(error) = parsed.error {
                 return Err(AppError::Ollama { message: error });
             }
             Ok(())
+        }
+    }
+
+    fn pull(&self, request: &PullRequest) -> impl Future<Output = Result<String, AppError>> + Send {
+        let url = self.url("/api/pull");
+        let request = request.clone();
+        async move {
+            let response = self
+                .http
+                .post(url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|err| self.unavailable(err))?;
+
+            let status = response.status();
+            let body = response.text().await.map_err(|err| AppError::Ollama {
+                message: err.to_string(),
+            })?;
+
+            if !status.is_success() {
+                return Err(AppError::Ollama {
+                    message: format!("POST /api/pull devolvió {status}: {body}"),
+                });
+            }
+
+            // Con `stream: false` Ollama devuelve un objeto final, pero algunos
+            // servidores emiten líneas de estado; se acepta la última línea JSON.
+            let line = body
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("");
+            let parsed: PullResponse =
+                serde_json::from_str(line).map_err(|err| AppError::Ollama {
+                    message: err.to_string(),
+                })?;
+            if let Some(error) = parsed.error {
+                return Err(AppError::Ollama { message: error });
+            }
+            Ok(parsed.status.unwrap_or_else(|| "ok".to_string()))
         }
     }
 
@@ -766,7 +845,7 @@ pub mod fake {
 
     use super::{
         ChatRequest, ChatResponse, CreateModelRequest, GenerateRequest, GenerateResponse,
-        ModelInfo, OllamaClient, RunningModel, Sha256Digest, TaggedModel,
+        ModelInfo, OllamaClient, PullRequest, RunningModel, Sha256Digest, TaggedModel,
     };
     use crate::error::AppError;
 
@@ -779,8 +858,10 @@ pub mod fake {
         running: Vec<RunningModel>,
         info: ModelInfo,
         tags: Vec<TaggedModel>,
+        pull_status: String,
         chat_requests: Mutex<Vec<ChatRequest>>,
         generate_requests: Mutex<Vec<GenerateRequest>>,
+        pull_requests: Mutex<Vec<PullRequest>>,
     }
 
     impl Default for FakeOllamaClient {
@@ -801,9 +882,27 @@ pub mod fake {
                 running: Vec::new(),
                 info: ModelInfo::default(),
                 tags: Vec::new(),
+                pull_status: "success".to_string(),
                 chat_requests: Mutex::new(Vec::new()),
                 generate_requests: Mutex::new(Vec::new()),
+                pull_requests: Mutex::new(Vec::new()),
             }
+        }
+
+        /// Fija el estado devuelto por `/api/pull`.
+        #[must_use]
+        pub fn with_pull_status(mut self, status: &str) -> Self {
+            self.pull_status = status.to_string();
+            self
+        }
+
+        /// Peticiones de `pull` registradas, en orden.
+        #[must_use]
+        pub fn pull_requests(&self) -> Vec<PullRequest> {
+            self.pull_requests
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
         }
 
         /// Fija la respuesta de `/api/chat`.
@@ -902,6 +1001,14 @@ pub mod fake {
             self.check()
         }
 
+        async fn pull(&self, request: &PullRequest) -> Result<String, AppError> {
+            self.check()?;
+            if let Ok(mut guard) = self.pull_requests.lock() {
+                guard.push(request.clone());
+            }
+            Ok(self.pull_status.clone())
+        }
+
         async fn show(&self, _model: &str) -> Result<ModelInfo, AppError> {
             self.check()?;
             Ok(self.info.clone())
@@ -981,5 +1088,59 @@ mod tests {
         let client = OllamaHttpClient::new("http://127.0.0.1:1").expect("cliente");
         let err = client.version().await.expect_err("debe fallar");
         assert!(matches!(err, AppError::OllamaUnavailable { .. }), "{err}");
+    }
+
+    /// Levanta un servidor HTTP mínimo que responde siempre con `status` y `body`.
+    ///
+    /// Devuelve la URL base a la que apuntar el cliente.
+    fn spawn_http_mock(status: u16, reason: &str, body: &str) -> String {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock");
+        let addr = listener.local_addr().expect("local_addr");
+        let response = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0u8; 8192];
+                let _ = stream.read(&mut buffer);
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn create_propagates_the_ollama_error_body() {
+        let ollama_message = "unsupported quantize type \"Q4_K_M\": supported types are int4, int8, nvfp4, mxfp4, mxfp8";
+        let body = serde_json::json!({ "error": ollama_message }).to_string();
+        let base = spawn_http_mock(400, "Bad Request", &body);
+        let client = OllamaHttpClient::new(&base).expect("cliente");
+
+        let request = CreateModelRequest {
+            model: "probe".to_string(),
+            files: BTreeMap::new(),
+            renderer: "qwen3.5".to_string(),
+            parser: "qwen3.5".to_string(),
+            parameters: BTreeMap::new(),
+            quantize: Some("mxfp4".to_string()),
+            stream: false,
+        };
+
+        let err = client
+            .create(&request)
+            .await
+            .expect_err("debe propagar el error de Ollama");
+        assert!(matches!(err, AppError::Ollama { .. }), "{err}");
+        let message = err.to_string();
+        assert!(
+            message.contains("unsupported quantize type"),
+            "el mensaje de Ollama debe propagarse: {message}"
+        );
+        assert!(message.contains("400"), "debe incluir el estado: {message}");
     }
 }

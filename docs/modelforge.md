@@ -3,27 +3,38 @@
 `modelforge` es un CLI en Rust para **importar modelos GGUF desde HuggingFace**,
 crearlos en Ollama, validarlos y enrutarlos en el gateway. Este documento cubre
 los subcomandos `import` (incremento 2), `create` (incremento 3), `test` / `bench`
-(incremento 4) y `list` / `info` / `route` (incremento 5).
+(incremento 4), `list` / `info` / `route` (incremento 5) y el import nativo de
+safetensors / atajo `pull` del hub (incremento 6).
 
-## `import` — descarga de un GGUF desde HuggingFace
+## `import` — descarga de un GGUF o import nativo de safetensors
 
-Resuelve un repo de HuggingFace, lista sus ficheros, selecciona el quant indicado
-y descarga el GGUF y, si se pide, el `mmproj` (proyector de visión). Muestra el
-tamaño y el progreso, y reanuda descargas interrumpidas.
+La fuente decide el flujo:
+
+- **Repo de HuggingFace** (`owner/model`): lista sus ficheros, selecciona el quant
+  indicado y descarga el GGUF y, si se pide, el `mmproj` (proyector de visión).
+  Muestra el tamaño y el progreso, y reanuda descargas interrumpidas.
+- **Directorio local con `.safetensors`**: import **nativo** —genera un Modelfile
+  `FROM <directorio>`, sube sus ficheros como blobs y crea el modelo en Ollama,
+  sin conversión previa ni dependencias externas (ni Python ni llama.cpp).
+- **Referencia del hub** (`hf.co/<repo>:<quant>`): se redirige al subcomando
+  [`pull`](#pull--descarga-desde-el-hub-de-huggingface).
 
 ### Uso
 
 ```console
-modelforge import <REPO> [--quant <QUANT>] [--mmproj] [--dest <DIR>] [--json]
+modelforge import <FUENTE> [--quant <QUANT>] [--name <MODELO>] [--quantize <QUANT>]
+                          [--mmproj] [--dest <DIR>] [--json]
 ```
 
 | Argumento / flag | Descripción |
 |---|---|
-| `<REPO>` | Repo de HuggingFace en formato `owner/model` (obligatorio). |
-| `-q, --quant <QUANT>` | Quant a descargar (p. ej. `Q6_K`, `Q4_K_M`, `q8_0`). **Obligatorio** para `import`. |
-| `--mmproj` | Descarga también el `mmproj` (proyector de visión). |
-| `--dest <DIR>` | Directorio de destino. Por defecto: `models/` en el directorio actual. |
-| `--json` | Emite el resultado como JSON en `stdout` (los logs van a `stderr`). |
+| `<FUENTE>` | Repo de HuggingFace (`owner/model`), directorio local con `.safetensors`, o `hf.co/<repo>:<quant>` (obligatorio). |
+| `-q, --quant <QUANT>` | Quant a descargar de un repo GGUF (p. ej. `Q6_K`, `Q4_K_M`, `q8_0`). **Obligatorio** para repos GGUF. |
+| `--name <MODELO>` | Nombre del modelo a crear en Ollama. **Obligatorio** para el import nativo. |
+| `--quantize <QUANT>` | Cuantización nativa de Ollama a aplicar al crear un snapshot de safetensors (p. ej. `nvfp4`). Solo en el import nativo. |
+| `--mmproj` | Descarga también el `mmproj` (proyector de visión) de un repo GGUF. |
+| `--dest <DIR>` | Directorio de destino de la descarga. Por defecto: `models/` en el directorio actual. |
+| `--json` | Emite el resultado como JSON en `stdout`; `stderr` solo lleva los eventos de etapa NDJSON. |
 
 ### Ejemplos
 
@@ -39,6 +50,18 @@ Descargar un modelo de visión con su proyector:
 modelforge import ggml-org/SmolVLM-256M-Instruct-GGUF --quant Q8_0 --mmproj --dest ./models
 ```
 
+Importar un modelo nativo desde un directorio de safetensors:
+
+```console
+modelforge import ./mi-modelo-safetensors --name mi-modelo
+```
+
+Importarlo además cuantizado a `nvfp4` en un único paso:
+
+```console
+modelforge import ./mi-modelo-safetensors --name mi-modelo --quantize nvfp4
+```
+
 Salida para agentes:
 
 ```console
@@ -47,6 +70,93 @@ modelforge import ggml-org/tiny-llamas --quant q4_0 --dest ./models --json
 
 ```json
 {"ok":true,"data":{"repo":"ggml-org/tiny-llamas","quant":"q4_0","dest":"./models","files":[{"path":"stories15M-q4_0.gguf","size":19077344,"cached":false}]}}
+```
+
+### Import nativo (safetensors)
+
+Ollama importa snapshots nativos de HuggingFace (`config.json`, tokenizer y
+ficheros `.safetensors`) directamente a partir de un Modelfile `FROM <directorio>`:
+
+1. Se valida que el directorio contiene al menos un `.safetensors` (si no, error
+   claro y código de salida distinto de 0).
+2. Se genera el Modelfile `FROM <directorio>`.
+3. Se sube cada fichero del directorio como blob (`POST /api/blobs/:digest`) y se
+   referencian en el mapa `files` de `POST /api/create`.
+4. Se crea el modelo (`--name`) y se verifica con `/api/show`.
+
+La **copia de pesos la gestiona Ollama**: `modelforge` no convierte ni copia. Si
+la arquitectura del modelo no la soporta el conversor interno de Ollama, el error
+de Ollama se propaga tal cual.
+
+> **Limitación conocida — Ollama 0.40.8 en Linux:** la creación desde safetensors
+> requiere el *runtime* **MLX**, que **no está disponible en Linux**. Ollama
+> responde `503` con `MLX runtime is not available` y `modelforge` propaga ese
+> error tal cual (código de salida ≠ 0). El import nativo (y `--quantize`) solo
+> funcionan en plataformas soportadas por el conversor interno de Ollama (p. ej.
+> **macOS con MLX**). En Linux, usa el flujo **GGUF** (`import --quant` o
+> `pull`), que sí está soportado. Esta limitación está registrada como *Non-Goal*
+> en `openspec/changes/native-model-import/design.md` y su cobertura real está
+> diferida a los tests `#[ignore]` de `tests/native_import_real_ollama.rs`.
+
+```console
+$ modelforge import ./mi-modelo-safetensors --name mi-modelo
+modelo `mi-modelo` creado en Ollama
+vision: no
+num_ctx: 262144
+Modelfile:
+FROM /ruta/absoluta/mi-modelo-safetensors
+...
+```
+
+### Cuantización nativa (`--quantize`)
+
+`--quantize <QUANT>` traduce al campo `quantize` de `POST /api/create` y hace que
+Ollama **cuantice durante la creación** (sin `llama-quantize` ni Python). Solo vale
+para un **directorio de safetensors**: Ollama rechaza cuantizar un GGUF ya
+convertido (`create-time quantization is only supported for safetensors imports`),
+así que con `create --from <gguf>` el CLI falla antes de llamar a la API.
+
+El valor se **valida antes** de llamar a la API contra la lista soportada; un valor
+inválido falla listando los válidos:
+
+```console
+$ modelforge import ./mi-modelo-safetensors --name mi-modelo --quantize NO_EXISTE
+error: cuantización `NO_EXISTE` no soportada; valores válidos: int4, int8, nvfp4, mxfp4, mxfp8
+$ echo $?
+1
+```
+
+Valores soportados: `int4`, `int8`, `nvfp4`, `mxfp4`, `mxfp8` (sin distinguir
+mayúsculas/minúsculas; el valor se envía en minúsculas).
+
+> **Nota:** esta lista es la que acepta **la versión de Ollama instalada**. Los
+> valores se verificaron contra **Ollama 0.40.8**, cuyo mensaje de la API es
+> `unsupported quantize type "X": supported types are int4, int8, nvfp4, mxfp4,
+> mxfp8`. Los quants de llama.cpp (`Q4_K_M`, `Q6_K`, `Q8_0`…) **no** son válidos
+> aquí: esos son los que se eligen con `--quant` al descargar un GGUF del Hub, no
+> los que Ollama aplica al cuantizar. Si se actualiza el servidor, revisa la lista
+> con `ollama create --help`.
+
+### Progreso por etapas
+
+Las operaciones que pueden durar minutos indican la etapa en curso. El progreso va
+**siempre a `stderr`**: en modo texto como mensajes de `tracing` y, con `--json`,
+como líneas NDJSON (`{"stage":"..."}`). Con `--json`, `stderr` contiene **solo**
+esas líneas (el logging humano se silencia) y **`stdout` conserva el contrato de un
+único objeto JSON** (el sobre final `{"ok":true,...}`) en todos los subcomandos.
+
+Las etapas se anuncian **cuando ocurren** y llevan el nombre de la spec: `descarga`
+(import de un repo GGUF), `conversión interna` (preparación del snapshot y subida de
+blobs), `cuantización` (con el valor) y `creación`. La etapa `conversión interna` se
+anuncia **tras** confirmar que Ollama responde (`/api/version`), de modo que no se
+emite ninguna etapa si el servidor está caído:
+
+```console
+$ modelforge import ./mi-modelo-safetensors --name mi-modelo --quantize nvfp4 --json
+{"stage":"conversión interna"}                       # → stderr
+{"stage":"cuantización","value":"nvfp4"}             # → stderr
+{"stage":"creación"}                                 # → stderr
+{"ok":true,"data":{...}}                             # → stdout (única línea)
 ```
 
 ### Selección del quant
@@ -92,7 +202,8 @@ protocolo a mano con `reqwest`.
 ### Salida y códigos de salida
 
 - Texto (por defecto): una línea por fichero con ruta, tamaño y estado.
-- `--json`: `{"ok":true,"data":{...}}` en `stdout`; los logs van a `stderr`.
+- `--json`: `{"ok":true,"data":{...}}` en `stdout` (un único objeto); en `stderr`
+  van **solo** las líneas NDJSON de etapa (`{"stage":...}`), sin logging humano.
 - Errores: mensaje claro en `stderr` (o `{"ok":false,"error":"..."}` con `--json`)
   y **código de salida distinto de 0**.
 
@@ -103,7 +214,14 @@ protocolo a mano con `reqwest`.
 | `el repo `X` no contiene el quant `Y`; disponibles: ...` | El quant pedido no está en el repo. |
 | `el repo `X` no contiene ningún fichero GGUF` | El repo no tiene GGUF. |
 | `el repo `X` no contiene ningún mmproj ...` | Se pidió `--mmproj` y no hay proyector. |
-| `falta `--quant <QUANT>` ...` | No se indicó el quant. |
+| `falta `--quant <QUANT>` ...` | No se indicó el quant de un repo GGUF. |
+| `falta `--name <MODELO>` ...` | No se indicó el nombre del modelo en el import nativo. |
+| `el directorio `X` no contiene ningún fichero `.safetensors`` | El directorio indicado no es un snapshot nativo. |
+| `cuantización `X` no soportada; valores válidos: int4, int8, nvfp4, mxfp4, mxfp8` | `--quantize` no es un valor soportado por Ollama. |
+| ``--quantize` solo es válido para un directorio de safetensors ...` | Se pidió `--quantize` con un GGUF ya convertido (Ollama lo rechaza). |
+| `el import nativo de safetensors no acepta `--quant, ...`` | Se pasaron flags de repo GGUF (`--quant`/`--mmproj`/`--dest`) al import nativo. |
+| `el import de un repo GGUF no acepta `--name, --quantize`` | Se pasaron flags del import nativo (`--name`/`--quantize`) a un repo GGUF. |
+| ``X` es una referencia del hub; usa `modelforge pull X`` | La fuente es `hf.co/...`; usa el subcomando `pull`. |
 | `repo inválido `X`: se espera `owner/model`` | Formato de repo incorrecto. |
 | `HuggingFace: ...` | Error del Hub (red, autenticación, repo inexistente). |
 
@@ -116,18 +234,26 @@ su `mmproj`), materializa el modelo en Ollama y **verifica** el resultado con
 ### Uso
 
 ```console
-modelforge create <NAME> --from <GGUF> [--mmproj <MMPROJ>] [--ctx <N>] [--renderer <NAME>] [--parser <NAME>] [--json]
+modelforge create <NAME> --from <PATH> [--mmproj <MMPROJ>] [--ctx <N>] [--renderer <NAME>] [--parser <NAME>] [--quantize <QUANT>] [--json]
 ```
 
 | Argumento / flag | Descripción |
 |---|---|
 | `<NAME>` | Nombre del modelo en Ollama, formato `model[:tag]` (obligatorio). |
-| `--from <GGUF>` | Fichero GGUF de origen. **Obligatorio**. Se absolutiza antes de usarlo. |
+| `--from <PATH>` | Fichero GGUF **o directorio de safetensors** de origen. **Obligatorio**. Se absolutiza antes de usarlo. |
 | `--mmproj <MMPROJ>` | Proyector de visión. Añade una segunda línea `FROM` y activa `vision`. |
 | `--ctx <N>` | Tamaño de contexto (`num_ctx`). Por defecto: `262144`. |
 | `--renderer <NAME>` | `RENDERER` del Modelfile. Por defecto: `qwen3.5`. |
 | `--parser <NAME>` | `PARSER` del Modelfile. Por defecto: `qwen3.5`. |
-| `--json` | Emite el resultado como JSON en `stdout` (los logs van a `stderr`). |
+| `--quantize <QUANT>` | Cuantización nativa de Ollama a aplicar al crear un directorio de safetensors (p. ej. `nvfp4`). Se valida antes de llamar a la API y **no** vale con un GGUF. |
+| `--json` | Emite el resultado como JSON en `stdout`; `stderr` solo lleva los eventos de etapa NDJSON. |
+
+Si `--from` es un **directorio**, se comporta como el [import
+nativo](#import-nativo-safetensors): exige al menos un `.safetensors`, sube como
+blobs los ficheros **relevantes** del directorio (pesos `.safetensors`, `.json`,
+tokenizers binarios y solo los `.txt` de tokenizer `vocab.txt`/`merges.txt`; se
+ignoran `README.md`, `.gitattributes`, `README.txt`, `requirements.txt`…) y usa
+`FROM <directorio>` en el Modelfile. `--quantize` **solo** se admite en este caso.
 
 ### Modelfile generado
 
@@ -511,6 +637,57 @@ la ruta `local-heretic` ya existe en `/home/u/.config/opencode/gateway.yaml`; no
 > `"backup":null`. Cuando el `gateway.yaml` ya existía, se guarda `<fichero>.bak` y
 > el campo `backup` lleva su ruta.
 
+## `pull` — descarga desde el hub de HuggingFace
+
+Atajo remoto para modelos que **ya publican GGUF** en el hub: delega por completo
+en Ollama (`POST /api/pull`), que resuelve y registra el modelo a partir de una
+referencia `hf.co/<repo>:<quant>`. No descarga ni convierte nada `modelforge`.
+
+### Uso
+
+```console
+modelforge pull <hf.co/<repo>:<quant>> [--json]
+```
+
+| Argumento / flag | Descripción |
+|---|---|
+| `<hf.co/<repo>:<quant>>` | Referencia del hub (obligatoria). Formato estricto: `hf.co/owner/modelo:QUANT`. |
+| `--json` | Emite el resultado como JSON en `stdout`; `stderr` solo lleva los eventos de etapa NDJSON. |
+
+### Ejemplos
+
+```console
+modelforge pull hf.co/usuario/modelo:Q4_K_M
+modelo `hf.co/usuario/modelo:Q4_K_M` descargado en Ollama
+```
+
+Salida para agentes:
+
+```json
+{"ok":true,"data":{"reference":"hf.co/usuario/modelo:Q4_K_M","status":"success"}}
+```
+
+### Validación de la referencia
+
+La referencia debe empezar por `hf.co/`, tener un repo `owner/modelo` y un quant no
+vacío. Cualquier otro formato falla **antes** de llamar a Ollama, con código de
+salida distinto de 0:
+
+```console
+$ modelforge pull usuario/modelo:Q4_K_M
+error: referencia inválida `usuario/modelo:Q4_K_M`: se espera `hf.co/<repo>:<quant>` (p. ej. `hf.co/usuario/modelo:Q4_K_M`)
+$ echo $?
+1
+```
+
+### Errores habituales
+
+| Mensaje | Causa |
+|---|---|
+| `referencia inválida `X`: se espera `hf.co/<repo>:<quant>`` | La referencia no tiene el formato esperado. |
+| `Ollama no responde en `X`: ...` | Ollama no está accesible. |
+| `Ollama: ...` | Ollama rechazó la descarga (repo/quant inexistente, etc.). |
+
 ## Flujo end-to-end (verificado)
 
 Pipeline mínimo para llevar un GGUF desde HuggingFace hasta el gateway:
@@ -598,6 +775,7 @@ cargo run -- bench --help
 cargo run -- list --help
 cargo run -- info --help
 cargo run -- route --help
+cargo run -- pull --help
 ```
 
 Pruebas de integración **ignoradas** por defecto (requieren red / Ollama real):
@@ -608,6 +786,9 @@ cargo test -- --ignored downloads_real_gguf_from_hub
 
 # creación real en Ollama (necesita un GGUF válido en disco)
 MODELFORGE_TEST_GGUF=/ruta/al/model.gguf cargo test -- --ignored creates_model_with_real_ollama
+
+# import nativo real (solo en un host soportado por MLX; en Linux Ollama 0.40.8 falla con 503)
+MODELFORGE_TEST_SAFETENSORS=/ruta/al/snapshot cargo test -- --ignored imports_safetensors_with_real_ollama
 
 # pruebas de humo y benchmark reales contra Ollama
 cargo test -- --ignored --test test_bench_real_ollama
@@ -622,6 +803,12 @@ con un mensaje claro cuando el servidor no responde, y que `route` sobre un
 `gateway.yaml` temporal (vía `--config`) añade la ruta, no la duplica, crea el
 backup `.bak` antes de reescribir y aborta ante un YAML inválido. **Nunca** toca el
 `gateway.yaml` real del usuario.
+
+El test `native_import_cli` comprueba, sin red ni Ollama, el import nativo de
+safetensors: falla pidiendo `--name`, falla si el directorio no tiene
+`.safetensors`, valida `--quantize` **antes** de llamar a Ollama y falla con error
+claro si Ollama no responde. El test `pull_cli` comprueba lo propio para `pull`:
+referencia válida + Ollama caído, y referencias inválidas con mensaje de formato.
 
 Variables opcionales de los tests reales de `create`: `MODELFORGE_TEST_OLLAMA` (URL
 base), `MODELFORGE_TEST_NAME` (nombre del modelo), `MODELFORGE_TEST_CTX` (`num_ctx`)

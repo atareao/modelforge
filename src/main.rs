@@ -11,9 +11,11 @@ mod import;
 mod list;
 mod modelfile;
 mod ollama;
+mod pull;
 mod quant;
 mod route;
 mod smoke;
+mod source;
 mod table;
 
 use std::path::PathBuf;
@@ -23,15 +25,16 @@ use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{
-    BenchArgs, Cli, Command, CreateArgs, GlobalArgs, ImportArgs, InfoArgs, ListArgs, RouteArgs,
-    TestArgs,
+    BenchArgs, Cli, Command, CreateArgs, GlobalArgs, ImportArgs, InfoArgs, ListArgs, PullArgs,
+    RouteArgs, TestArgs,
 };
 use crate::error::AppError;
+use crate::source::SourceKind;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    init_tracing(cli.global.verbose);
+    init_tracing(cli.global.verbose, cli.global.json);
     tracing::debug!(command = cli.command.name(), "ejecutando subcomando");
 
     match run(&cli) {
@@ -46,7 +49,15 @@ fn main() -> ExitCode {
 /// Inicializa el subsistema de logging en función del nivel de detalle.
 ///
 /// El nivel también puede fijarse con la variable `RUST_LOG`.
-fn init_tracing(verbose: bool) {
+///
+/// Con `--json`, `stderr` debe contener **solo** las líneas NDJSON de etapa
+/// ([`emit_stage`]), así que se **silencia** el logging humano del subscriber para
+/// no mezclar formatos: `stderr` queda reservado al contrato NDJSON.
+fn init_tracing(verbose: bool, json: bool) {
+    if json {
+        return;
+    }
+
     let filter = if verbose { "debug" } else { "info" };
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter));
 
@@ -66,7 +77,7 @@ fn init_tracing(verbose: bool) {
 fn run(cli: &Cli) -> Result<ExitCode, AppError> {
     match &cli.command {
         Command::Import(args) => {
-            run_import(args, cli.global.json)?;
+            run_import(args, &cli.global)?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Create(args) => {
@@ -90,6 +101,10 @@ fn run(cli: &Cli) -> Result<ExitCode, AppError> {
             run_route(args, &cli.global)?;
             Ok(ExitCode::SUCCESS)
         }
+        Command::Pull(args) => {
+            run_pull(args, &cli.global)?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 
@@ -101,9 +116,81 @@ fn runtime() -> Result<tokio::runtime::Runtime, AppError> {
         .map_err(AppError::from)
 }
 
-/// Ejecuta `import`: resuelve el repo, selecciona el quant y descarga reanudable.
-fn run_import(args: &ImportArgs, json: bool) -> Result<(), AppError> {
-    let repo = hf::RepoId::parse(&args.repo)?;
+/// Ejecuta `import`: descarga de un repo GGUF o import nativo de safetensors.
+///
+/// La fuente decide el flujo:
+/// - repo de HuggingFace (`org/model`) → descarga reanudable del GGUF;
+/// - directorio local con `.safetensors` → creación nativa del modelo en Ollama;
+/// - referencia del hub (`hf.co/...`) → se redirige al subcomando `pull`.
+fn run_import(args: &ImportArgs, global: &GlobalArgs) -> Result<(), AppError> {
+    match SourceKind::detect(&args.source) {
+        SourceKind::GgufRepo(repo) => {
+            reject_flags_for_gguf_import(args)?;
+            import_gguf(&repo, args, global.json)
+        }
+        SourceKind::SafetensorsDir(dir) => {
+            reject_flags_for_native_import(args)?;
+            import_native(&dir, args, global)
+        }
+        SourceKind::HubRef(input) => Err(AppError::UsePull { input }),
+    }
+}
+
+/// Rechaza los flags que solo tienen sentido en el import nativo de safetensors.
+///
+/// El import de un repo GGUF descarga ficheros ya convertidos y no crea el modelo
+/// en Ollama, así que `--name` y `--quantize` no aplican; ignorarlos en silencio
+/// confundiría al usuario (o, peor, iría a la red sin validar).
+///
+/// # Errors
+///
+/// Devuelve [`AppError::GgufImportUnsupportedFlags`] si se indicó alguno.
+fn reject_flags_for_gguf_import(args: &ImportArgs) -> Result<(), AppError> {
+    let mut flags = Vec::new();
+    if args.name.is_some() {
+        flags.push("--name".to_string());
+    }
+    if args.quantize.is_some() {
+        flags.push("--quantize".to_string());
+    }
+
+    if flags.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::GgufImportUnsupportedFlags { flags })
+    }
+}
+
+/// Rechaza los flags que solo tienen sentido en el import de repos GGUF.
+///
+/// El import nativo parte de un snapshot local ya descargado, así que `--quant`,
+/// `--mmproj` y `--dest` no aplican; ignorarlos en silencio confundiría al usuario.
+///
+/// # Errors
+///
+/// Devuelve [`AppError::NativeImportUnsupportedFlags`] si se indicó alguno.
+fn reject_flags_for_native_import(args: &ImportArgs) -> Result<(), AppError> {
+    let mut flags = Vec::new();
+    if args.quant.is_some() {
+        flags.push("--quant".to_string());
+    }
+    if args.mmproj {
+        flags.push("--mmproj".to_string());
+    }
+    if args.dest.is_some() {
+        flags.push("--dest".to_string());
+    }
+
+    if flags.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::NativeImportUnsupportedFlags { flags })
+    }
+}
+
+/// Descarga el GGUF (y su `mmproj`) de un repo de HuggingFace.
+fn import_gguf(repo_input: &str, args: &ImportArgs, json: bool) -> Result<(), AppError> {
+    let repo = hf::RepoId::parse(repo_input)?;
     let quant = args.quant.clone().ok_or(AppError::MissingQuant)?;
     let dest = args.dest.clone().unwrap_or_else(default_dest);
 
@@ -115,11 +202,113 @@ fn run_import(args: &ImportArgs, json: bool) -> Result<(), AppError> {
         dest: &dest,
     };
 
+    emit_stage(json, "descarga");
+
     let runtime = runtime()?;
     let report = runtime.block_on(import::run(&client, &options, !json))?;
 
     emit_import(&report, json)?;
     Ok(())
+}
+
+/// Importa un modelo nativo desde un directorio local con `.safetensors`.
+///
+/// Genera el Modelfile `FROM <directorio>`, sube los ficheros como blobs y crea
+/// el modelo en Ollama, aplicando `--quantize` si se indicó.
+fn import_native(
+    dir: &std::path::Path,
+    args: &ImportArgs,
+    global: &GlobalArgs,
+) -> Result<(), AppError> {
+    let name = args.name.clone().ok_or(AppError::MissingName)?;
+    let client = ollama::OllamaHttpClient::new(global.ollama.clone())?;
+    let options = create::CreateOptions {
+        name: &name,
+        from: dir,
+        mmproj: None,
+        ctx: None,
+        renderer: None,
+        parser: None,
+        quantize: args.quantize.as_deref(),
+    };
+    let progress = CliProgress { json: global.json };
+
+    let runtime = runtime()?;
+    let report = runtime.block_on(create::run(&client, &options, &progress))?;
+
+    emit_create(&report, global.json)?;
+    Ok(())
+}
+
+/// Adaptador de [`create::Progress`] que vuelca las etapas al mecanismo de [`emit_stage`].
+struct CliProgress {
+    json: bool,
+}
+
+impl create::Progress for CliProgress {
+    fn stage(&self, stage: create::Stage) {
+        emit_stage(self.json, stage.label());
+    }
+
+    fn stage_with_value(&self, stage: create::Stage, value: &str) {
+        emit_stage_with_value(self.json, stage.label(), value);
+    }
+}
+
+/// Ejecuta `pull`: descarga un GGUF del hub delegando en Ollama.
+fn run_pull(args: &PullArgs, global: &GlobalArgs) -> Result<(), AppError> {
+    let client = ollama::OllamaHttpClient::new(global.ollama.clone())?;
+    let options = pull::PullOptions {
+        reference: &args.reference,
+    };
+
+    emit_stage(global.json, "solicitando la descarga a Ollama");
+    let runtime = runtime()?;
+    let report = runtime.block_on(pull::run(&client, &options))?;
+
+    emit_pull(&report, global.json)?;
+    Ok(())
+}
+
+/// Presenta el resultado de `pull` en JSON o en texto.
+///
+/// # Errors
+///
+/// Devuelve [`AppError::Json`] si el reporte no se puede serializar.
+fn emit_pull(report: &pull::PullReport, json: bool) -> Result<(), AppError> {
+    if json {
+        let data = serde_json::to_value(report)?;
+        println!("{}", serde_json::json!({ "ok": true, "data": data }));
+        return Ok(());
+    }
+
+    println!("modelo `{}` descargado en Ollama", report.reference);
+    Ok(())
+}
+
+/// Emite un evento de progreso por etapa.
+///
+/// Va **siempre a `stderr`**: en modo texto por `tracing` y en modo `--json` como
+/// una línea NDJSON `{"stage":...}`. En `--json` el logging humano del subscriber
+/// está silenciado ([`init_tracing`]), de modo que `stderr` contiene **solo** estas
+/// líneas y `stdout` conserva el contrato de un único objeto JSON (el sobre final).
+fn emit_stage(json: bool, stage: &str) {
+    if json {
+        eprintln!("{}", serde_json::json!({ "stage": stage }));
+    } else {
+        tracing::info!(stage, "etapa en curso");
+    }
+}
+
+/// Emite un evento de progreso con un valor asociado (p. ej. el `quantize`).
+///
+/// Igual que [`emit_stage`], escribe en `stderr` en ambos modos.
+fn emit_stage_with_value(json: bool, stage: &str, value: &str) {
+    if json {
+        eprintln!("{}", serde_json::json!({ "stage": stage, "value": value }));
+    } else {
+        tracing::info!(stage, value, "etapa en curso");
+    }
 }
 
 /// Directorio de destino por defecto para `import`.
@@ -165,10 +354,12 @@ fn run_create(args: &CreateArgs, global: &GlobalArgs) -> Result<(), AppError> {
         ctx: args.ctx,
         renderer: args.renderer.as_deref(),
         parser: args.parser.as_deref(),
+        quantize: args.quantize.as_deref(),
     };
+    let progress = CliProgress { json: global.json };
 
     let runtime = runtime()?;
-    let result = runtime.block_on(create::run(&client, &options))?;
+    let result = runtime.block_on(create::run(&client, &options, &progress))?;
 
     emit_create(&result, global.json)?;
     Ok(())
@@ -187,6 +378,9 @@ fn emit_create(result: &create::CreateReport, json: bool) -> Result<(), AppError
     }
 
     println!("modelo `{}` creado en Ollama", result.model);
+    if let Some(quantize) = &result.quantize {
+        println!("quantize: {quantize}");
+    }
     let vision = if result.info.has_vision() {
         "sí"
     } else {

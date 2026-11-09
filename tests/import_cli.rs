@@ -84,3 +84,31 @@ fn import_with_missing_quant_fails_with_nonzero_exit() {
         "debe indicar que falta el quant; stdout: {stdout}"
     );
 }
+
+/// El import de un repo GGUF rechaza los flags que solo aplican al import nativo
+/// (`--name`, `--quantize`) **antes** de salir a la red.
+#[test]
+fn import_gguf_rejects_native_only_flags_before_network() {
+    for (flag, value) in [("--quantize", Some("nvfp4")), ("--name", Some("mi-modelo"))] {
+        let mut args = vec!["--json", "import", "org/model", "--quant", "Q6_K", flag];
+        if let Some(value) = value {
+            args.push(value);
+        }
+
+        let output = run(&args);
+        assert!(!output.status.success(), "{flag}: status {}", output.status);
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("\"ok\":false"), "{flag}: stdout {stdout}");
+        assert!(
+            stdout.contains(flag.trim_start_matches('-')),
+            "{flag}: el error debe nombrar el flag; stdout {stdout}"
+        );
+        assert!(stdout.contains("no acepta"), "{flag}: stdout {stdout}");
+        // El rechazo ocurre antes de resolver el repo: no debe intentar el Hub.
+        assert!(
+            !stdout.contains("HuggingFace"),
+            "{flag}: no debe llegar a la red; stdout {stdout}"
+        );
+    }
+}
