@@ -337,8 +337,6 @@ mod tests {
     use std::future::Future;
     use std::sync::Mutex;
 
-    use tokio::io::AsyncWriteExt as _;
-
     use super::*;
 
     #[test]
