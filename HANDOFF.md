@@ -4,8 +4,10 @@
 
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
 - Issue #1: https://github.com/atareao/modelforge/issues/1
-- PR #2 **fusionado** a `development` (fast-forward, `966e61a`). Rama `feature/initial-plan` eliminada.
-- Rama actual: `development`.
+- PR #2 **fusionado** a `development`. Rama `feature/initial-plan` eliminada.
+- **Release v0.1.0 publicada**: PR #4 (`development` → `main`) fusionado; tag `v0.1.0` en `main`; release en GitHub.
+- Ramas: `main` (producción, v0.1.0) · `development` (integración).
+- **CI/CD configurado** (PR #6 → development): `.github/workflows/{ci,release-prepare,release}.yml`, `.vampus.yml`, `cliff.toml`, `GIT_FLOW.md`, `AGENTS.md`.
 - Incrementos 1–6: implementación funcional completa y verificada.
 - Auditoría Rust: ✅ aprobada.
 - Flujo e2e real verificado: import → create → test → bench → route → limpieza.
@@ -17,11 +19,17 @@
 
 ## Tarea pendiente
 
-- Ninguna. Feature cerrada en `development`.
+- Configurar secretos en GitHub: `GH_PAT` (contents: write) y `CARGO_REGISTRY_TOKEN`.
+- (Opcional) Actualizar `README.md`: aún dice "Proyecto en planificación" y referencia `openspec/changes/modelforge/` (ya archivado).
 
 ## Siguiente paso sugerido
 
-- Preparar release: PR `development` → `main` (v0.1.0) cuando el usuario lo decida.
+- Al fusionar `development` → `main`, `release-prepare.yml` bumpa versión, genera `CHANGELOG.md`, crea tag y sincroniza `development` automáticamente.
+
+## Notas de CI
+
+- `ci.yml`: `fmt --check`, `clippy --all-targets -D warnings`, `test` en PR a `main`/`development`.
+- Se corrigió un `unused import` en `src/import.rs` (tests) detectado por el toolchain stable de CI pero no por el local (1.97.0).
 
 ## Verificación rápida
 
