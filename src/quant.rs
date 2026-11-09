@@ -27,6 +27,40 @@ pub fn is_gguf(path: &str) -> bool {
     path.to_ascii_lowercase().ends_with(".gguf")
 }
 
+/// Cuantizaciones que acepta el campo `quantize` de `POST /api/create`.
+///
+/// Ollama solo admite un puñado de tipos para la **cuantización durante la
+/// creación** (`ollama create --quantize`), distintos de los quants de llama.cpp
+/// (`Q4_K_M`, `Q6_K`…) que se usan para *elegir* un GGUF, no para cuantizarlo. La
+/// lista se validó contra **Ollama 0.40.8**; el mensaje de la API es
+/// `unsupported quantize type "X": supported types are int4, int8, nvfp4, mxfp4, mxfp8`.
+///
+/// La comparación es **sin distinguir mayúsculas/minúsculas** y el valor se
+/// canonicaliza a minúsculas (como lo devuelve Ollama) antes de enviarlo.
+///
+/// **Nota:** la lista depende de la versión de Ollama instalada; si se actualiza
+/// el servidor, revisar aquí los valores aceptados.
+pub const SUPPORTED_QUANTIZE: &[&str] = &["int4", "int8", "nvfp4", "mxfp4", "mxfp8"];
+
+/// Devuelve la forma canónica (minúsculas) de `value` si es una cuantización
+/// soportada por Ollama; `None` en caso contrario.
+#[must_use]
+pub fn canonical_quantize(value: &str) -> Option<String> {
+    SUPPORTED_QUANTIZE
+        .iter()
+        .find(|quant| quant.eq_ignore_ascii_case(value))
+        .map(|quant| (*quant).to_string())
+}
+
+/// Lista de cuantizaciones soportadas, para mensajes de error.
+#[must_use]
+pub fn supported_quantize_values() -> Vec<String> {
+    SUPPORTED_QUANTIZE
+        .iter()
+        .map(|quant| (*quant).to_string())
+        .collect()
+}
+
 /// Selecciona el GGUF del quant pedido y, opcionalmente, su `mmproj`.
 ///
 /// # Errors
@@ -245,5 +279,49 @@ mod tests {
         ]);
         let quants = available_quants(&list);
         assert_eq!(quants, vec!["Q4_K_M".to_string(), "Q6_K".to_string()]);
+    }
+
+    #[test]
+    fn canonical_quantize_accepts_values_of_ollama_0_40() {
+        // Lista real reportada por Ollama 0.40.8.
+        for value in ["int4", "int8", "nvfp4", "mxfp4", "mxfp8"] {
+            assert_eq!(
+                canonical_quantize(value).as_deref(),
+                Some(value),
+                "{value} debe aceptarse"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_quantize_normalizes_case_to_lowercase() {
+        assert_eq!(canonical_quantize("INT4").as_deref(), Some("int4"));
+        assert_eq!(canonical_quantize("Int8").as_deref(), Some("int8"));
+        assert_eq!(canonical_quantize("NVFP4").as_deref(), Some("nvfp4"));
+        assert_eq!(canonical_quantize("MXFP4").as_deref(), Some("mxfp4"));
+        assert_eq!(canonical_quantize("MxFP8").as_deref(), Some("mxfp8"));
+    }
+
+    #[test]
+    fn canonical_quantize_rejects_llama_cpp_quants_and_unknown_values() {
+        // Los quants de llama.cpp NO son válidos para `--quantize`.
+        for value in ["Q4_K_M", "Q6_K", "q4_k_m", "F16", "NO_EXISTE", ""] {
+            assert_eq!(canonical_quantize(value), None, "{value} no debe aceptarse");
+        }
+    }
+
+    #[test]
+    fn supported_quantize_values_matches_ollama_0_40() {
+        let values = supported_quantize_values();
+        assert_eq!(
+            values,
+            vec![
+                "int4".to_string(),
+                "int8".to_string(),
+                "nvfp4".to_string(),
+                "mxfp4".to_string(),
+                "mxfp8".to_string(),
+            ]
+        );
     }
 }

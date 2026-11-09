@@ -78,6 +78,81 @@ pub enum AppError {
     #[error("falta `--from <GGUF>`: indica el fichero GGUF de origen del modelo")]
     MissingFrom,
 
+    /// No se indicó el nombre del modelo a crear con `--name`.
+    #[error("falta `--name <MODELO>`: indica el nombre del modelo a crear en Ollama")]
+    MissingName,
+
+    /// El directorio de safetensors no contiene ningún `.safetensors`.
+    #[error(
+        "el directorio `{path}` no contiene ningún fichero `.safetensors`: \
+         indica un snapshot nativo (pesos + `config.json` + tokenizer)"
+    )]
+    NoSafetensorsFound {
+        /// Ruta del directorio indicado.
+        path: String,
+    },
+
+    /// El valor de `--quantize` no es una cuantización soportada por Ollama.
+    #[error(
+        "cuantización `{value}` no soportada; valores válidos: {}",
+        supported_quantize(.supported)
+    )]
+    UnsupportedQuantize {
+        /// Valor introducido por el usuario.
+        value: String,
+        /// Valores soportados por Ollama.
+        supported: Vec<String>,
+    },
+
+    /// Se pidió `--quantize` con un origen que no es un directorio de safetensors.
+    #[error(
+        "`--quantize` solo es válido para un directorio de safetensors; `{path}` no lo es. \
+         Ollama rechaza cuantizar en la creación un GGUF ya convertido: \
+         cuantízalo antes con las herramientas de llama.cpp"
+    )]
+    QuantizeNotSafetensors {
+        /// Ruta del origen indicado.
+        path: String,
+    },
+
+    /// El import nativo recibió flags que solo aplican al import de repos GGUF.
+    #[error(
+        "el import nativo de safetensors no acepta {}: \
+         se descarga un snapshot local, no un repo del Hub",
+        flags.join(", ")
+    )]
+    NativeImportUnsupportedFlags {
+        /// Flags recibidos que no aplican (p. ej. `--quant`).
+        flags: Vec<String>,
+    },
+
+    /// El import de un repo GGUF recibió flags que solo aplican al import nativo.
+    #[error(
+        "el import de un repo GGUF no acepta {}: `--name` y `--quantize` solo valen con un \
+         directorio local de safetensors (para un GGUF ya convertido usa `--quant`)",
+        flags.join(", ")
+    )]
+    GgufImportUnsupportedFlags {
+        /// Flags recibidos que no aplican (p. ej. `--quantize`).
+        flags: Vec<String>,
+    },
+
+    /// La referencia del hub no tiene el formato `hf.co/<repo>:<quant>`.
+    #[error(
+        "referencia inválida `{input}`: se espera `hf.co/<repo>:<quant>` (p. ej. `hf.co/usuario/modelo:Q4_K_M`)"
+    )]
+    InvalidHubRef {
+        /// Valor introducido por el usuario.
+        input: String,
+    },
+
+    /// La fuente es una referencia del hub y debe usarse con `pull`.
+    #[error("`{input}` es una referencia del hub; usa `modelforge pull {input}`")]
+    UsePull {
+        /// Referencia introducida por el usuario.
+        input: String,
+    },
+
     /// No se indicó el modelo de la ruta con `--model`.
     #[error("falta `--model <MODEL>`: indica el modelo de la ruta `{name}` del gateway")]
     MissingModel {
@@ -143,6 +218,11 @@ fn available_hint(available: &[String]) -> String {
     }
 }
 
+/// Lista legible de cuantizaciones soportadas, para [`AppError::UnsupportedQuantize`].
+fn supported_quantize(supported: &[String]) -> String {
+    supported.join(", ")
+}
+
 impl AppError {
     /// Representación estable del error para la salida `--json`.
     #[must_use]
@@ -193,5 +273,53 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Q6_K"), "{msg}");
         assert!(msg.contains("Q4_K_M, Q5_K_M"), "{msg}");
+    }
+
+    #[test]
+    fn unsupported_quantize_lists_valid_values() {
+        let err = AppError::UnsupportedQuantize {
+            value: "NO_EXISTE".into(),
+            supported: vec!["Q4_K_M".into(), "Q6_K".into()],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("NO_EXISTE"), "{msg}");
+        assert!(msg.contains("Q4_K_M, Q6_K"), "{msg}");
+    }
+
+    #[test]
+    fn quantize_not_safetensors_states_reason() {
+        let err = AppError::QuantizeNotSafetensors {
+            path: "/tmp/model.gguf".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/tmp/model.gguf"), "{msg}");
+        assert!(msg.contains("safetensors"), "{msg}");
+    }
+
+    #[test]
+    fn native_import_unsupported_flags_lists_them() {
+        let err = AppError::NativeImportUnsupportedFlags {
+            flags: vec!["--quant".into(), "--dest".into()],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("--quant, --dest"), "{msg}");
+    }
+
+    #[test]
+    fn gguf_import_unsupported_flags_lists_them() {
+        let err = AppError::GgufImportUnsupportedFlags {
+            flags: vec!["--quantize".into(), "--name".into()],
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("--quantize, --name"), "{msg}");
+        assert!(msg.contains("no acepta"), "{msg}");
+    }
+
+    #[test]
+    fn invalid_hub_ref_states_expected_format() {
+        let err = AppError::InvalidHubRef {
+            input: "usuario/repo:Q4_K_M".into(),
+        };
+        assert!(err.to_string().contains("hf.co/<repo>:<quant>"));
     }
 }

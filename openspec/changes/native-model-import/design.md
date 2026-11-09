@@ -16,6 +16,12 @@
 - Soportar arquitecturas que el conversor interno de Ollama no entiende.
 - Cuantizar GGUF existentes al importar (Ollama no lo permite).
 - Alterar el comportamiento actual de `import` sobre repos GGUF.
+- **Importar safetensors en plataformas donde Ollama no dispone de *runtime* MLX.**
+  Ollama 0.40.8 en Linux responde `503 MLX runtime is not available` al crear desde
+  safetensors; el import nativo y `--quantize` solo funcionan en hosts soportados
+  (p. ej. macOS con MLX). En Linux se documenta como limitación conocida y se usa el
+  flujo GGUF (`import --quant` / `pull`). La cobertura real queda diferida a tests
+  `#[ignore]` gateados por entorno (`tests/native_import_real_ollama.rs`).
 
 ## Decisions
 
@@ -31,6 +37,8 @@
 - [Versión de Ollama antigua sin `quantize`] → detectar/avisar si la creación falla por campo no soportado.
 - [Nombres de quant de Ollama] → validar contra lista conocida antes de invocar.
 - [Copia de pesos] → el import nativo no copia ni convierte; Ollama lee el directorio.
+- [Runtime MLX ausente] → en Linux Ollama 0.40.8 falla con `503 MLX runtime is not
+  available`; se propaga tal cual y se documenta como limitación (usar flujo GGUF).
 
 ## Migration Plan
 
