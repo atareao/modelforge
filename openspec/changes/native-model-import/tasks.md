@@ -2,19 +2,18 @@
 
 ## 1. Import nativo desde safetensors
 
-- [ ] 1.1 Detección del tipo de fuente (repo GGUF / directorio safetensors / `hf.co`), con test unitario.
+- [ ] 1.1 Detección del tipo de fuente (repo GGUF / directorio safetensors / `hf.co`) con un enum `SourceKind`, con test unitario.
 - [ ] 1.2 Generación de Modelfile con `FROM <directorio>`, con test unitario.
 - [ ] 1.3 Implementar `import <dir> --name <n>` de extremo a extremo y verificar con un modelo pequeño real.
 - [ ] 1.4 Error claro si el directorio no contiene `.safetensors`, con test.
 - [ ] 1.5 Documentar el flujo nativo en `docs/modelforge.md`.
 
-## 2. Conversión y cuantización vía llama.cpp
+## 2. Cuantización en el import
 
-- [ ] 2.1 Trait `Converter` + detección de `convert-hf-to-gguf.py` y `llama-quantize` en `PATH`, con test.
-- [ ] 2.2 Invocación de la conversión a GGUF intermedio, con test (converter falso).
-- [ ] 2.3 Cuantización con `llama-quantize` y validación del quant destino, con test.
-- [ ] 2.4 Error accionable si faltan las herramientas, con test de integración.
-- [ ] 2.5 Documentar `--quantize` en `docs/modelforge.md`.
+- [ ] 2.1 Flag `--quantize <QUANT>` con validación contra la lista soportada, con test.
+- [ ] 2.2 Enviar el campo `quantize` en `/api/create`, con test.
+- [ ] 2.3 Error claro si Ollama rechaza el quant o la arquitectura, con test de integración.
+- [ ] 2.4 Documentar `--quantize` en `docs/modelforge.md`.
 
 ## 3. Atajo remoto `pull`
 
@@ -24,7 +23,7 @@
 
 ## 4. Progreso y salida
 
-- [ ] 4.1 Progreso por etapas (descarga, conversión, cuantización, creación) con eventos JSON en `--json`.
+- [ ] 4.1 Progreso por etapas (descarga, conversión interna, cuantización, creación) con eventos JSON en `--json`.
 - [ ] 4.2 Verificar `--json` y códigos de salida distintos de 0 en los nuevos flujos, con test.
 
 ## 5. Verificación

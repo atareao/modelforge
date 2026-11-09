@@ -3,21 +3,25 @@
 - **Repositorio:** atareao/modelforge
 - **Issue:** #8
 - **Estado:** propuesto (pendiente de aprobación)
-- **Objetivo:** permitir a `modelforge` trabajar con repos de HuggingFace publicados en formato nativo (`.safetensors`) y con GGUF del hub, sin conversión manual previa.
+- **Objetivo:** permitir a `modelforge` importar modelos publicados en formato nativo (`.safetensors`) y GGUF del hub, apoyándose en las capacidades nativas de Ollama, **sin Python ni llama.cpp**.
 
 ## Alcance
 
-Tres flujos de trabajo:
+Tres flujos de trabajo, todos nativos de Ollama:
 
-1. **Import nativo (safetensors):** `modelforge import <dir> --name <modelo>` sobre un directorio con `.safetensors` genera un Modelfile con `FROM <dir>` y crea el modelo en Ollama sin conversión previa.
-2. **Conversión + cuantización vía llama.cpp:** `--quantize <QUANT>` invoca `convert-hf-to-gguf.py` (FP16 GGUF intermedio) y `llama-quantize` (formato destino). Las herramientas se detectan en `PATH`; si faltan, error accionable.
+1. **Import nativo (safetensors):** `modelforge import <dir> --name <modelo>` sobre un directorio con `.safetensors` y metadatos genera un Modelfile con `FROM <dir>` y crea el modelo.
+2. **Import + cuantización:** `--quantize <QUANT>` aplica el `quantize` nativo de Ollama en `/api/create` (un solo paso, sin herramientas externas).
 3. **Atajo remoto del hub:** `modelforge pull hf.co/<repo>:<quant>` delega en Ollama la descarga y el registro del GGUF del hub.
 
 ## Fuera de alcance
 
-- Reimplementar la conversión safetensors→GGUF en Rust.
-- Descargar/instalar llama.cpp o Python automáticamente.
-- Cambiar el contrato de los comandos existentes (el cambio es aditivo).
+- Conversión/cuantización vía llama.cpp o Python.
+- Arquitecturas no soportadas por el conversor interno de Ollama.
+- Cuantizar GGUF existentes al importar (Ollama no lo permite).
+
+## Decisión clave
+
+La doc de Ollama confirma que importa safetensors nativamente (`Modelfile` con `FROM <directorio>`) y cuantiza modelos FP16/FP32 con `-q/--quantize` (API: campo `quantize`). Por tanto el flujo del issue #8 **no necesita dependencias externas**.
 
 ## Referencias
 
@@ -29,18 +33,17 @@ Tres flujos de trabajo:
 ## Tareas
 
 ### 1. Import nativo desde safetensors
-- [ ] 1.1 Detección del tipo de fuente (repo GGUF / directorio safetensors / `hf.co`), con test unitario.
+- [ ] 1.1 Detección del tipo de fuente (repo GGUF / directorio safetensors / `hf.co`) con un enum `SourceKind`, con test unitario.
 - [ ] 1.2 Generación de Modelfile con `FROM <directorio>`, con test unitario.
 - [ ] 1.3 `import <dir> --name <n>` de extremo a extremo, verificado con un modelo pequeño real.
 - [ ] 1.4 Error claro si el directorio no contiene `.safetensors`, con test.
 - [ ] 1.5 Documentar el flujo nativo en `docs/modelforge.md`.
 
-### 2. Conversión y cuantización vía llama.cpp
-- [ ] 2.1 Trait `Converter` + detección de `convert-hf-to-gguf.py` y `llama-quantize` en `PATH`, con test.
-- [ ] 2.2 Invocación de la conversión a GGUF intermedio, con test (converter falso).
-- [ ] 2.3 Cuantización con `llama-quantize` y validación del quant destino, con test.
-- [ ] 2.4 Error accionable si faltan las herramientas, con test de integración.
-- [ ] 2.5 Documentar `--quantize` en `docs/modelforge.md`.
+### 2. Cuantización en el import
+- [ ] 2.1 Flag `--quantize <QUANT>` con validación contra la lista soportada, con test.
+- [ ] 2.2 Enviar el campo `quantize` en `/api/create`, con test.
+- [ ] 2.3 Error claro si Ollama rechaza el quant o la arquitectura, con test de integración.
+- [ ] 2.4 Documentar `--quantize` en `docs/modelforge.md`.
 
 ### 3. Atajo remoto `pull`
 - [ ] 3.1 Subcomando `pull hf.co/<repo>:<quant>`, con parseo y validación, y test unitario.
@@ -48,7 +51,7 @@ Tres flujos de trabajo:
 - [ ] 3.3 Documentar `pull` en `docs/modelforge.md`.
 
 ### 4. Progreso y salida
-- [ ] 4.1 Progreso por etapas (descarga, conversión, cuantización, creación) con eventos JSON en `--json`.
+- [ ] 4.1 Progreso por etapas (descarga, conversión interna, cuantización, creación) con eventos JSON en `--json`.
 - [ ] 4.2 Verificar `--json` y códigos de salida distintos de 0 en los nuevos flujos, con test.
 
 ### 5. Verificación
@@ -58,5 +61,6 @@ Tres flujos de trabajo:
 ## Criterios de aceptación
 
 - Los tres flujos funcionan de extremo a extremo y están documentados.
-- Sin `unwrap`/`panic` en producción; red y llama.cpp aislados tras traits.
+- Sin dependencias externas (ni Python ni llama.cpp).
+- Sin `unwrap`/`panic` en producción; red aislada tras traits.
 - Suite verde y CI limpio.
