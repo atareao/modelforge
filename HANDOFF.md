@@ -44,6 +44,14 @@
 - Nota operativa: para los benchmarks se detuvo temporalmente `llm-gateway.service`; **ya está restaurado (active)**.
 - Follow-up abierto: posible issue en modelforge/Ollama por el tool-calling en qwen2/qwen2.5; reconsiderar Qwen2.5-Coder si se resuelve.
 
+## Limpieza del almacén de modelos Ollama (2026-11-10)
+
+- Almacén reducido de **19 → 8 modelos**, ~**93 GB** liberados (leftovers de evaluación).
+- **Borrados**: `deepseek-v4-pro-9b-heretic:q6_K`, `qwen3:14b`, `mistral-small3.2:24b`, `gemma4:12b`, `mannix/jackod-9b-coder-dflash`, `granite4.2:8b`, `qwen3.5:9b-q4_K_M` (base de `qwen35-9b-agent`; los blobs están compartidos → borrarlo **no** rompe el modelo derivado), `qwen2.5-coder:14b`, `lfm2.5:24b-a2b-q4_K_M`, `devstral-small-2:24b`, `mannix/qwen3.6-27b-a3b-coder`.
+- **Conservados** (8): `qwen35-9b-agent`, `coder-qwopus-9b`, `deepseek-v4-pro-9b-heretic:q6_K-256k` (ruta `local-deepseek`), `llama3.2:3b`, `qwen3:8b` (rutas), `bge-m3` (embeddings), y `llama3.1:8b` + `qwen2.5:7b-instruct` (referenciados por otros proyectos: `mcp-recipes` y tests de `llm-gateway`).
+- Documentado en `docs/agentes-locales-podcast.md` (sección "Limpieza del almacén de modelos").
+- Nota viva: la ruta `local-deepseek` sigue **sin que ningún agente la use**.
+
 ## Agentes locales en llm-gateway (2026-11-10)
 
 - **5 rutas** locales sobre el proxy OpenAI-compatible (`127.0.0.1:4010`), con **failover a OpenRouter**:
@@ -51,7 +59,7 @@
   - `local-writer` → **`qwen3:8b`**.
   - `local-coder` → **`coder-qwopus-9b`** (Qwen3.5-9B) — agente de **codificación** (y comandos de shell para `dime`), **con warmup**.
   - `local-agent` → **`qwen35-9b-agent`** (Qwen3.5-9B · `num_ctx` 8192) — agente de **tooling** y de los **8 subagentes**.
-  - `local-deepseek` → **DeepSeek**.
+  - `local-deepseek` → **DeepSeek** (sigue sin que ningún agente la use).
   - Se **eliminó** la ruta `local-gptoss`.
 - **Warmup/keep-alive activo SOLO en `local-coder`** (Opción A): `warmup.interval_ms=240000`, `timeout_ms=300000`. Mantiene `coder-qwopus-9b` residente.
 - **8 subagentes** (`code-verifier`, `data-persistence`, `docker-expert`, `planificador-podcast-srt`, `postgresql-expert`, `sql-expert`, `sqlite-expert`, `typst-expert`) usan `model: gateway/local-agent`.
