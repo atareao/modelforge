@@ -57,3 +57,45 @@ ollama run coder-qwopus-9b
 
 - Issue potencial en `modelforge`/Ollama: soporte de tool-calling para qwen2/qwen2.5 (template/parser).
 - Repetir la evaluación cuando Ollama añada un parser qwen2.5 con tools, para reconsiderar Qwen2.5-Coder.
+
+---
+
+## Consolidación de rutas del gateway (2026-11-10)
+
+Tras la evaluación se consolidó `~/.config/opencode/gateway.yaml` a **una única ruta de código**:
+
+- `local-coder` → su modelo local cambió de `qwen3-coder:30b-a3b-q4_K_M` (19 GB, no cabe en 16 GB, forzaba offload) a **`coder-qwopus-9b`** (Qwen3.5-9B, 6,6 GB, cabe limpio).
+- Se eliminó la ruta `local-code` (gemma4:12b): era generalista, no especializada en código, y solapaba con `local-coder`.
+- Se borraron de Ollama `qwen3-coder:30b-a3b-q4_K_M` y `coder-qwen35-4b-3d` (~23,5 GB liberados), al quedar sin ruta.
+
+Rutas finales del gateway: `local-fast`, `local-writer`, `local-gptoss`, `local-coder`, `local-agent`, `local-deepseek`.
+
+## Ruta de tooling/agente: `local-agent` (2026-11-10)
+
+Para **operaciones sobre servidores usando herramientas** se añadió la ruta `local-agent` → **`qwen3.5:9b-q4_K_M`**. Se comparó el tool-calling de los modelos locales con 3 herramientas (`ssh_exec`, `read_file`, `send_email`): selección correcta, extracción de argumentos, **llamadas en paralelo** y respuesta multi-turno (resultado de tool → respuesta final sin re-llamadas).
+
+| Modelo | Tamaño | Selección | Args | Paralelo | Multi-turno | tok/s |
+|---|---|---|---|---|---|---|
+| **qwen3.5:9b-q4_K_M** | 6,6 GB | ✅ | ✅ | ✅ (2) | ✅ | 47,6 |
+| qwen3:14b | 9,3 GB | ✅ | ✅ | ✅ (2) | ✅ | 30,0 |
+| qwen3:8b | 5,2 GB | ✅ | ✅ | ✅ (2) | ✅ | 52,2 |
+| coder-qwopus-9b | 6,6 GB | ✅ | ✅ | ✅ (2) | ✅ | 43,9 |
+| granite4.2:8b | 5,3 GB | ✅ | ✅ | ❌ (1) | — | — |
+| gpt-oss:20b | 13 GB | ✅ | ✅ | ❌ (1) | — | — |
+| mistral-small3.2:24b | 15 GB | ✅ | ✅ | ❌ (1) | — | — |
+| devstral-small-2:24b | 15 GB | ✅ | ✅ | ❌ (1) | — | — |
+| lfm2.5:24b-a2b | 14 GB | ✅ | ✅ | ❌ (1) | — | — |
+
+**Hallazgo:** solo la familia **Qwen3.x** (qwen3, qwen3.5) emite **tool-calls en paralelo** en Ollama 0.40.8; el resto de modelos solo devuelve una llamada por turno. Los modelos de 24B (mistral, devstral, lfm) además no caben limpios en 16 GB (offload).
+
+**Decisión:** `local-agent` → `qwen3.5:9b-q4_K_M` (9B, 6,6 GB, 47,6 tok/s, tools nativas + paralelo).
+
+## Uso de la ruta de agente
+
+```bash
+# operaciones sobre servidores con herramientas
+curl -s http://127.0.0.1:4010/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"local-agent","messages":[{"role":"user","content":"..."}],"tools":[...]}'
+```
+
+---
