@@ -247,3 +247,44 @@ Con `num_ctx=8192`: `model fits alongside existing models` → **coexistencia**.
 - `~/.config/opencode/opencode.jsonc.bak-agentes-20261110141602`
 
 ---
+
+## Limpieza del almacén de modelos (2026-11-10)
+
+Tras consolidar el *stack* (5 rutas del gateway + 8 subagentes), se hizo inventario de **todos** los modelos en Ollama y se borraron los que ya no referenciaba ni el gateway, ni los agentes, ni ningún otro proyecto.
+
+### Criterio
+
+**EN USO** = referenciado por `gateway.yaml`, `opencode.jsonc`, un `agents/*.md`, `dime.yml` o el código de otro proyecto. Todo lo demás es *leftover* del ciclo de evaluación de modelos.
+
+### Inventario y decisión
+
+| Modelo | Antes | Decisión | Motivo |
+|---|---|---|---|
+| `llama3.2:3b` | EN USO | se mantiene | ruta `local-fast` |
+| `qwen3:8b` | EN USO | se mantiene | ruta `local-writer` (+ 9 agentes) |
+| `coder-qwopus-9b` | EN USO | se mantiene | ruta `local-coder` + `dime` + `rust-writer` |
+| `qwen35-9b-agent` | EN USO | se mantiene | ruta `local-agent` + 8 subagentes |
+| `deepseek-v4-pro-9b-heretic:q6_K-256k` | EN USO | se mantiene | ruta `local-deepseek` |
+| `bge-m3` | AMBIGUO | se mantiene | embeddings (1,2 GB); útil para RAG local |
+| `llama3.1:8b` | AMBIGUO | se mantiene | default de código en `/data/rust/mcp-recipes` |
+| `qwen2.5:7b-instruct` | AMBIGUO | se mantiene | tests de `/data/rust/llm-gateway` (`puglia` usa el tag `qwen2.5:7b`) |
+| `deepseek-v4-pro-9b-heretic:q6_K` | SIN USO | borrado | tag duplicado (8,3 GB) |
+| `qwen3:14b` | SIN USO | borrado | leftover de evaluación (9,3 GB) |
+| `mistral-small3.2:24b` | SIN USO | borrado | leftover (15 GB) |
+| `gemma4:12b` | SIN USO | borrado | leftover (8 GB) |
+| `mannix/jackod-9b-coder-dflash` | SIN USO | borrado | leftover (7 GB) |
+| `granite4.2:8b` | SIN USO | borrado | leftover (5,3 GB) |
+| `qwen3.5:9b-q4_K_M` | SIN USO | borrado | base de `qwen35-9b-agent`; los blobs son content-addressed y compartidos, borrarlo NO lo rompe (6,6 GB) |
+| `qwen2.5-coder:14b` | SIN USO | borrado | leftover (9 GB) |
+| `lfm2.5:24b-a2b-q4_K_M` | SIN USO | borrado | leftover (14 GB) |
+| `devstral-small-2:24b` | SIN USO | borrado | leftover (15 GB) |
+| `mannix/qwen3.6-27b-a3b-coder` | SIN USO | borrado | leftover (16 GB) |
+
+### Resultado
+
+- **Antes:** 19 modelos → **Después:** 8 modelos.
+- **Liberados:** ~93 GB (de 1,1 T a 708 G libres en `/data`).
+- Modelos finales: `qwen35-9b-agent`, `coder-qwopus-9b`, `deepseek-v4-pro-9b-heretic:q6_K-256k`, `llama3.1:8b`, `qwen3:8b`, `qwen2.5:7b-instruct`, `llama3.2:3b`, `bge-m3`.
+- **Nota viva:** la ruta `local-deepseek` existe pero **ningún agente la usa**; se conserva por si se necesita a futuro.
+
+---
