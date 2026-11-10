@@ -22,6 +22,7 @@
     Detecta `python3` + `convert_hf_to_gguf.py` + `llama-quantize` en `PATH`; si faltan, error accionable (sin auto-install). Backend por defecto `ollama` sin cambios.
   - **#29 (2026-11-10, docs)** — evaluación de modelos de código locales GGUF sobre RTX 4060 Ti 16 GB con Ollama 0.40.8; documentada en `docs/coder-models-evaluation.md`.
   - **#31, #32 (2026-11-10, docs)** — consolidación de rutas de modelos y `local-agent` en `docs/coder-models-evaluation.md`; material de podcast en `docs/agentes-locales-podcast.md`.
+  - **(2026-11-10, docs)** — redefinición a **5 rutas** en `llm-gateway` (nuevo `local-coder` con warmup y `local-agent` sobre `qwen35-9b-agent`; se elimina `local-gptoss`) + alineación de `opencode.jsonc`. Documentado en `docs/agentes-locales-podcast.md`.
 - Contrato `--json`: `stdout` = un único objeto JSON; `stderr` = eventos de etapa en NDJSON puro.
 - Suite: **159 tests unitarios + integración passing** (los reales de red/Ollama/llama.cpp van `#[ignore]` y gateados por env: `MODELFORGE_TEST_SAFETENSORS`, `MODELFORGE_TEST_LLAMACPP`, etc.).
 - `cargo clippy --all-targets -- -D warnings` limpio.
@@ -29,28 +30,35 @@
 - OpenSpec: specs consolidadas en `openspec/specs/modelforge/spec.md`; changes archivados (`2026-11-09-modelforge`, `2026-11-09-native-model-import`, `2026-11-09-llamacpp-bridge`) (`openspec validate modelforge --strict`).
 - Planes: `plans/PLAN-001-ARCHIVED.md`, `plans/PLAN-002-ARCHIVED.md` y `plans/PLAN-003-ARCHIVED.md` (todos completados).
 - Docs: `docs/modelforge.md`, `docs/native-import.md`, `docs/llamacpp-bridge.md`, `docs/coder-models-evaluation.md` y `docs/agentes-locales-podcast.md`.
-- `llm-gateway` (proxy OpenAI-compatible, `127.0.0.1:4010`) **activo**; dos agentes locales con failover a OpenRouter (ver sección de agentes locales).
+- `llm-gateway` (proxy OpenAI-compatible, `127.0.0.1:4010`) **activo**; **5 rutas** locales con failover a OpenRouter (ver sección de agentes locales).
 - Limitación conocida: Ollama en Linux no tiene MLX → el import nativo de safetensors da `503 MLX runtime is not available`; en Linux usar `--backend llama.cpp`. En macOS la vía nativa sigue válida. Documentado en `docs/native-import.md` y `docs/llamacpp-bridge.md`.
 
 ## Evaluación de modelos de código locales (2026-11-10)
 
 - Objetivo: modelos GGUF de código **<10 GB**, rápidos y con soporte de **tools** para RTX 4060 Ti 16 GB + Ollama 0.40.8. Detalle en `docs/coder-models-evaluation.md` (PRs #29, #31, #32).
 - **Conservados** en Ollama:
-  - `coder-qwopus-9b` (Qwen3.5-9B · 6,6 GB · 43 tok/s · tools ✅) → agente `local-coder`.
-  - `qwen3.5:9b-q4_K_M` (Qwen3.5-9B · tools ✅) → agente `local-agent`.
-- **Eliminados** (no cumplían la spec de tools): `coder-qwen25-7b`, `coder-qwen25-14b`, `coder-strand-rust-14b` (tool-calls no nativas en Ollama 0.40.8), `coder-dscoder-v2-lite` (sin tools), y hoy `qwen3-coder:30b-a3b-q4_K_M` + `coder-qwen35-4b-3d` (~23,5 GB liberados).
+  - `coder-qwopus-9b` (Qwen3.5-9B · 5,76 GB · 43 tok/s · tools ✅) → agente `local-coder`.
+  - `qwen35-9b-agent` (`FROM qwen3.5:9b-q4_K_M` + `PARAMETER num_ctx 8192` · 5,34 GB · tools ✅) → agente `local-agent`.
+- **Eliminados** (no cumplían la spec de tools): `coder-qwen25-7b`, `coder-qwen25-14b`, `coder-strand-rust-14b` (tool-calls no nativas en Ollama 0.40.8), `coder-dscoder-v2-lite` (sin tools), `qwen3-coder:30b-a3b-q4_K_M` + `coder-qwen35-4b-3d` (~23,5 GB liberados) y hoy `gpt-oss:20b` (~12 GB liberados, no cabía junto a `coder-qwopus-9b` en 16 GB).
 - **Hallazgo central:** Ollama 0.40.8 **no parsea `tool_calls`** de la familia qwen2/qwen2.5 (falla también el `qwen2.5-coder:14b` oficial); solo la familia **Qwen3.x** emite tool-calls nativas **y en paralelo**.
 - Nota operativa: para los benchmarks se detuvo temporalmente `llm-gateway.service`; **ya está restaurado (active)**.
 - Follow-up abierto: posible issue en modelforge/Ollama por el tool-calling en qwen2/qwen2.5; reconsiderar Qwen2.5-Coder si se resuelve.
 
 ## Agentes locales en llm-gateway (2026-11-10)
 
-- Dos agentes locales sobre el proxy OpenAI-compatible (`127.0.0.1:4010`), con **failover a OpenRouter**:
-  - `local-coder` → **`coder-qwopus-9b`** (Qwen3.5-9B) — agente de **codificación** (y comandos de shell para `dime`).
-  - `local-agent` → **`qwen3.5:9b-q4_K_M`** — agente de **tooling** (operaciones sobre servidores con herramientas).
+- **5 rutas** locales sobre el proxy OpenAI-compatible (`127.0.0.1:4010`), con **failover a OpenRouter**:
+  - `local-fast` → **`llama3.2:3b`**.
+  - `local-writer` → **`qwen3:8b`**.
+  - `local-coder` → **`coder-qwopus-9b`** (Qwen3.5-9B) — agente de **codificación** (y comandos de shell para `dime`), **con warmup**.
+  - `local-agent` → **`qwen35-9b-agent`** (Qwen3.5-9B · `num_ctx` 8192) — agente de **tooling** y de los **8 subagentes**.
+  - `local-deepseek` → **DeepSeek**.
+  - Se **eliminó** la ruta `local-gptoss`.
 - **Warmup/keep-alive activo SOLO en `local-coder`** (Opción A): `warmup.interval_ms=240000`, `timeout_ms=300000`. Mantiene `coder-qwopus-9b` residente.
+- **8 subagentes** (`code-verifier`, `data-persistence`, `docker-expert`, `planificador-podcast-srt`, `postgresql-expert`, `sql-expert`, `sqlite-expert`, `typst-expert`) usan `model: gateway/local-agent`.
 - **`dime` apunta a `local-coder`**: `~/.config/dime/dime.yml` (`model: local-coder`, `base_url: 127.0.0.1:4010`). Probado.
-- **`OLLAMA_MAX_LOADED_MODELS=2`** (antes 1) en `/etc/systemd/system/ollama.service.d/override.conf`: `coder-qwopus-9b` + `qwen3.5:9b` conviven sin evicción (~12,9 GB / 16 GB VRAM, 100 % GPU, tok/s intactos). **Solo caben 2 modelos 9B.**
+- **`qwen35-9b-agent`** = `FROM qwen3.5:9b-q4_K_M` + `PARAMETER num_ctx 8192`. Clave: el gateway **no envía `num_ctx`**; sin grabarlo, el segundo modelo pide 32k y **evicta** (hallazgo: log con `predicted="9.2 GiB" predicted_num_ctx=32768 ... evicting`; con 8192 → `fits alongside existing models`).
+- **`OLLAMA_MAX_LOADED_MODELS=2`** (antes 1) en `/etc/systemd/system/ollama.service.d/override.conf`. **Coexistencia verificada**: `qwen35-9b-agent` (5,34 GB) + `coder-qwopus-9b` (5,76 GB), 100 % GPU, ~12,6/16 GB, tok/s intactos. **Solo caben 2 modelos 9B**.
+- **`opencode.jsonc`** (provider `gateway`) alineado: `local-fast`, `local-writer`, `local-coder`, `local-agent` y `local-deepseek` (se quitaron `local-gptoss` y `local-code`).
 - Documentación: `docs/agentes-locales-podcast.md` (material de podcast: agente de codificación y de tooling).
 
 ## Follow-up abierto: backend mistral.rs (2026-11-10)
