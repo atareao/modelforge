@@ -64,9 +64,8 @@ Se probaron 6 modelos GGUF (todos < 10 GB) con tres pruebas: tool-calling (`mess
 |---|---|---|
 | `local-fast` | llama3.2:3b | rápido |
 | `local-writer` | qwen3:8b | redacción |
-| `local-gptoss` | gpt-oss:20b | general |
-| `local-coder` | **coder-qwopus-9b** | **codificación** |
-| `local-agent` | **qwen3.5:9b-q4_K_M** | **tooling/agente** |
+| `local-coder` | **coder-qwopus-9b** | **codificación** (y los comandos de `dime`) |
+| `local-agent` | **qwen35-9b-agent** (Qwen3.5-9B, ctx 8192) | **tooling/agente + 8 subagentes** |
 | `local-deepseek` | deepseek-v4-pro-9b-heretic | — |
 
 El **warmup/keep-alive** del gateway está activo **solo en `local-coder`** (Opción A: una sola ruta caliente). Se subió `OLLAMA_MAX_LOADED_MODELS` a **2**, de modo que `coder-qwopus-9b` y `qwen3.5:9b` pueden convivir sin que uno desaloje al otro.
@@ -186,5 +185,65 @@ Medición con **ambos** modelos cargados simultáneamente:
 - `~/.config/opencode/gateway.yaml.bak-warmup-20261110091239`
 - `~/.config/dime/dime.yml.bak-20261110091239`
 - `/etc/systemd/system/ollama.service.d/override.conf.bak-20261110091638`
+
+---
+
+## Sustitución de `gpt-oss:20b` por Qwen3.5-9B (2026-11-10)
+
+### El problema
+
+`gpt-oss:20b` (12 GB) respaldaba **8 subagentes** (`code-verifier`, `docker-expert`, `sql-expert`, `sqlite-expert`, `postgresql-expert`, `data-persistence`, `typst-expert`, `planificador-podcast-srt`) vía la ruta `local-gptoss`. Pero **no cabe junto a `coder-qwopus-9b`**:
+
+```
+gpt-oss:20b (12 GB) + coder-qwopus-9b (5,76 GB) = 17,8 GB > 15,8 GB usables
+```
+
+Con el warmup de `local-coder`, cada 4 min se producía *thrashing*.
+
+### Candidatos que caben junto al coder
+
+Prueba de convivencia real (con `num_ctx=8192`):
+
+| Candidato | VRAM junto al coder | ¿Caben? | Tools paralelo | tok/s |
+|---|---|---|---|---|
+| **qwen3.5:9b** | 5,34 + 5,76 = **11,1 GB** | ✅ | ✅ | 47 |
+| qwen3:8b | 5,84 + 5,76 = **11,6 GB** | ✅ | ✅ | 52 |
+| qwen3:14b | 9,85 GB | ❌ evicta | ✅ | 30 |
+| gpt-oss:20b | 12 GB | ❌ | ❌ (1 llamada) | 65 |
+
+### La causa raíz (hallazgo)
+
+Con `OLLAMA_CONTEXT_LENGTH=32768`, el segundo modelo se cargaba con `num_ctx=32768` y pedía **9,2 GB**. El log de Ollama lo cantó:
+
+```
+llama-server model predicted to exceed available memory, evicting
+predicted="9.2 GiB"  predicted_num_ctx=32768  available="9.8 GiB"
+```
+
+Con `num_ctx=8192`: `model fits alongside existing models` → **coexistencia**. Como el gateway no envía `num_ctx`, hay que **grabarlo en el modelo** (`PARAMETER num_ctx 8192`).
+
+### Prueba de calidad (`think:false`, tareas de los subagentes)
+
+| Tarea | gpt-oss:20b | **qwen3.5:9b** | qwen3:8b |
+|---|---|---|---|
+| SQL (top 5 clientes 2024) | ✅ (cortado) | ✅ impecable | ✅ |
+| Dockerfile multi-stage Rust | ❌ **vacío** | ✅ correcto | ✅ |
+| Lógica ("all but 9") | 9 | 9 | 9 |
+
+### Decisión aplicada
+
+- Los **8 subagentes** pasan de `gateway/local-gptoss` a **`gateway/local-agent`**.
+- Se crea el modelo **`qwen35-9b-agent`** (`FROM qwen3.5:9b-q4_K_M` + `PARAMETER num_ctx 8192`); `local-agent` apunta a él.
+- Se **elimina** la ruta `local-gptoss` y se **borra `gpt-oss:20b`** (~12 GB liberados).
+- `opencode.jsonc` (provider `gateway`) alineado: `local-fast`, `local-writer`, `local-coder`, `local-agent`, `local-deepseek`.
+
+**Resultado verificado:** `qwen35-9b-agent` (5,34 GB) + `coder-qwopus-9b` (5,76 GB) conviven al 100 % en GPU (12,6 GB / 16 GB); `local-agent` devuelve **tool-calls en paralelo**.
+
+**Caveat:** en razonamiento multi-paso *duro* con el pensamiento activado, `gpt-oss:20b` (20B MoE) aún puede ser superior; se sacrifica algo de techo por convivencia y tools en paralelo.
+
+### Backups
+
+- `~/.config/opencode/gateway.yaml.bak-qwen35-20261110141536`
+- `~/.config/opencode/opencode.jsonc.bak-agentes-20261110141602`
 
 ---
