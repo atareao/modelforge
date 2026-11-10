@@ -69,7 +69,7 @@ Se probaron 6 modelos GGUF (todos < 10 GB) con tres pruebas: tool-calling (`mess
 | `local-agent` | **qwen3.5:9b-q4_K_M** | **tooling/agente** |
 | `local-deepseek` | deepseek-v4-pro-9b-heretic | — |
 
-Los **warmup/keep-alive** del gateway (bloques `warmup` por backend) están **deshabilitados**; con `MAX_LOADED_MODELS=1` y 16 GB solo tendría sentido calentar **una** ruta.
+El **warmup/keep-alive** del gateway está activo **solo en `local-coder`** (Opción A: una sola ruta caliente). Se subió `OLLAMA_MAX_LOADED_MODELS` a **2**, de modo que `coder-qwopus-9b` y `qwen3.5:9b` pueden convivir sin que uno desaloje al otro.
 
 ## El muro: convertir safetensors a GGUF sin Python
 
@@ -124,4 +124,67 @@ Los **warmup/keep-alive** del gateway (bloques `warmup` por backend) están **de
 ## Ver también
 
 - `docs/coder-models-evaluation.md` — detalle de las pruebas de los 6 modelos coder (mismas pruebas, formato técnico).
+---
+
+## Configuración operativa aplicada (2026-11-10)
+
+### Warmup solo en `local-coder` (Opción A)
+
+Para evitar el *cold start* de `dime`, se activa el keep-alive **solo** en la ruta de código. El gateway envía un `POST /chat/completions` mínimo al arrancar y cada 4 min, reiniciando el `keep_alive` de Ollama:
+
+```yaml
+  - name: local-coder
+    backend:
+      - base_url: "http://localhost:11434/v1"
+        model: "coder-qwopus-9b"
+        timeout_ms: 120000
+        warmup:
+          interval_ms: 240000   # 4 min < keep_alive de Ollama (5 min)
+          timeout_ms: 300000    # cold load de un 9B
+```
+
+Verificado: `llm_gateway_warmup_total{route="local-coder",result="success"} 1` y `coder-qwopus-9b` residente (~6,18 GB VRAM).
+
+### `dime` → `local-coder`
+
+`dime` ya apuntaba al gateway; solo cambió el modelo:
+
+```yaml
+# ~/.config/dime/dime.yml
+provider: openai
+base_url: 127.0.0.1:4010
+use_https: false
+endpoint: v1/chat/completions
+token: "sk-local"
+model: local-coder
+```
+
+Cadena: `dime → 127.0.0.1:4010/v1/chat/completions → ruta local-coder → coder-qwopus-9b (caliente)`.
+Prueba real: `dime "…comando para uso de disco de cada subdirectorio de /var…"` → `du -sh /var/* | sort -h` (sin fences; journal: `route=local-coder`).
+
+### `OLLAMA_MAX_LOADED_MODELS=2`
+
+`/etc/systemd/system/ollama.service.d/override.conf`:
+
+```ini
+Environment="OLLAMA_MAX_LOADED_MODELS=2"
+```
+
+Medición con **ambos** modelos cargados simultáneamente:
+
+| Modelo | Total | VRAM | GPU% | tok/s |
+|---|---|---|---|---|
+| coder-qwopus-9b | 5,65 GB | 5,65 GB | 100 % | 43 |
+| qwen3.5:9b-q4_K_M | 5,83 GB | 5,83 GB | 100 % | 47 |
+
+- VRAM: **12 978 MiB / 16 380 MiB** → ~3 GB libres. **Sin offload**, y **sin degradación** de tok/s.
+- Beneficio: alternar `local-coder` y `local-agent` **ya no evicta** (fin del *thrashing*).
+- Límite: solo caben **dos** 9B; un tercer modelo (o un 14B) provoca evicción.
+
+### Backups
+
+- `~/.config/opencode/gateway.yaml.bak-warmup-20261110091239`
+- `~/.config/dime/dime.yml.bak-20261110091239`
+- `/etc/systemd/system/ollama.service.d/override.conf.bak-20261110091638`
+
 ---
