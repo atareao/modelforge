@@ -12,6 +12,23 @@
 
 **Cerrado:** PR #39 mergeado en `development`; issue #38 cerrado; plan archivado en `plans/PLAN-005-ARCHIVED.md`.
 
+## Handoff — Evaluación de motores locales (issue #36, `plans/PLAN-004.md`)
+
+**Estado:** investigación de arquitectura CERRADA salvo el PR externo de Blazar (6.2). El binario `modelforge` NO se ha tocado. Sesión 2026-11-11.
+
+**Conclusiones con datos (medidos en la máquina):**
+- **Ollama se queda como motor primario para GGUF**: 9B real (Qwen3.5 Q8_0) -> **30,29 tok/s**, 100 % GPU, 8,5 GB, cold start ~3,3 s, coexisten 2×9B.
+- **mistral.rs 9B con las 32 capas en GPU (`-n 0:32`) -> 31,08/31,11 tok/s** (empata/supera a Ollama). El `14,78` previo era **puro offload a CPU** (7/32 capas). Tool-calling paralelo ✅. Pero 13,2 GB VRAM (sin coexistencia) y ~26 s cold start -> **motor complementario para safetensors/UQFF**, no sustituto de Ollama.
+- **Blazar** (gateway Rust, 2 meses, bus factor 1) **funciona** pero **no se adopta**: empata (30,10 tok/s), 47 s cold start, 13,2 GB, enruta GGUF -> llama.cpp (Vulkan).
+- Bug de CUDA de Blazar **localizado y parcheado** en vivo (NVIDIA renombró `"CUDA Version:"` -> `"CUDA UMD Version:"`). Fix en `/tmp/opencode/blazar-src` (sin commit).
+- **D4 decidida (2026-11-11):** Ollama primario GGUF + mistral.rs complementario; `llm-gateway` se mantiene; `modelforge` -> **forja + batería comparativa**.
+
+**Pendiente inmediato:**
+1. **6.2 — PR del fix de Blazar** (repo externo `santanu20/blazar`, lo firma el usuario; **sesión limpia**; `rust-writer` -> `rust-reviewer`). Único punto abierto del plan.
+2. Cerrar issue #36 y crear `docs/<feature>.md`; renombrar el plan a `plans/PLAN-004-ARCHIVED.md`.
+
+**Referencias:** issue #36 · `plans/PLAN-004.md` (§4.4 resultado 6.1) · clone con fix en `/tmp/opencode/blazar-src` · bench del test 6.1 en `/tmp/opencode/bench9b/`.
+
 ## Estado
 
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
@@ -41,7 +58,7 @@
 - `cargo fmt --check` limpio.
 - OpenSpec: specs consolidadas en `openspec/specs/modelforge/spec.md`; changes archivados (`2026-11-09-modelforge`, `2026-11-09-native-model-import`, `2026-11-09-llamacpp-bridge`) (`openspec validate modelforge --strict`).
 - Planes: `plans/PLAN-001-ARCHIVED.md`, `plans/PLAN-002-ARCHIVED.md` y `plans/PLAN-003-ARCHIVED.md` (todos completados).
-- Docs: `docs/modelforge.md`, `docs/native-import.md`, `docs/llamacpp-bridge.md`, `docs/coder-models-evaluation.md`, `docs/agentes-locales-podcast.md` y `docs/oneshot-models-evaluation.md`.
+- Docs: `docs/modelforge.md`, `docs/native-import.md`, `docs/llamacpp-bridge.md`, `docs/coder-models-evaluation.md`, `docs/agentes-locales-podcast.md`, `docs/motores-locales-podcast.md` y `docs/oneshot-models-evaluation.md`.
 - `llm-gateway` (proxy OpenAI-compatible, `127.0.0.1:4010`) **activo**; **7 rutas** locales con failover a OpenRouter (ver sección de agentes locales).
 - Limitación conocida: Ollama en Linux no tiene MLX → el import nativo de safetensors da `503 MLX runtime is not available`; en Linux usar `--backend llama.cpp`. En macOS la vía nativa sigue válida. Documentado en `docs/native-import.md` y `docs/llamacpp-bridge.md`.
 
