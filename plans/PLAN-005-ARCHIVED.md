@@ -120,7 +120,7 @@ Detalle completo en `docs/oneshot-models-evaluation.md`.
 - [x] Decidir ganador y escribir §7/§8.
 - [x] Crear `docs/oneshot-models-evaluation.md`.
 - [x] Aplicar cambio en el gateway + `dime` (si procede).
-- [ ] Archivar el plan.
+- [x] Archivar el plan.
 
 ## 10. Artefactos
 
