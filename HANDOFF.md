@@ -10,6 +10,8 @@
 - **`dime` → `local-dime`** (`~/.config/dime/dime.yml`); `system_role` ampliado con "sin bloques de código ni backticks". Probado con `dime` real.
 - Backups: `gateway.yaml.bak-oneshot-20261111070051`, `dime.yml.bak-oneshot-20261111070051`, `dime.yml.bak-fence-20261111070252`.
 
+**Cerrado:** PR #39 mergeado en `development`; issue #38 cerrado; plan archivado en `plans/PLAN-005-ARCHIVED.md`.
+
 ## Estado
 
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
@@ -86,7 +88,6 @@
 
 ## Tarea pendiente
 
-- PR de los docs + `plans/PLAN-005.md` (issue #38) y cerrar #38.
 - PR del fix de Blazar (6.2, issue #36) en sesión limpia. Cerrar #36 + archivar PLAN-004.
 
 ## Notas de tooling
