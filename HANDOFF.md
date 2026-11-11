@@ -1,5 +1,15 @@
 # HANDOFF — modelforge
 
+## Modelo ligero para tareas one-shot (issue #38, `plans/PLAN-005.md`) — 2026-11-11
+
+**Evaluación (11 modelos, harness propio en `/tmp/opencode/oneshot/`):** ganador **`gemma3:4b`** como todoterreno (12/14); `qwen2.5-coder:1.5b` 5/5 en shell pero **sin persona**; `qwen2.5:1.5b` sirve para resúmenes pero **en vivo falla en `dime`** (contexto Windows, fences, erratas); por debajo de ~1B está roto; `qwen3:4b` **inservible** (filtra razonamiento con `think:false`). Doc: `docs/oneshot-models-evaluation.md`.
+
+**Aplicado en el gateway (5 → 7 rutas):**
+- **`local-oneshot` → `gemma3:4b`** — tareas one-shot de texto (resúmenes, respuestas).
+- **`local-dime` → `gemma3:4b`** con warmup — comando de shell para `dime` **y** su persona ácida.
+- **`dime` → `local-dime`** (`~/.config/dime/dime.yml`); `system_role` ampliado con "sin bloques de código ni backticks". Probado con `dime` real.
+- Backups: `gateway.yaml.bak-oneshot-20261111070051`, `dime.yml.bak-oneshot-20261111070051`, `dime.yml.bak-fence-20261111070252`.
+
 ## Estado
 
 - Repo independiente: `atareao/modelforge` (local: `/data/rust/modelforge`).
@@ -29,8 +39,8 @@
 - `cargo fmt --check` limpio.
 - OpenSpec: specs consolidadas en `openspec/specs/modelforge/spec.md`; changes archivados (`2026-11-09-modelforge`, `2026-11-09-native-model-import`, `2026-11-09-llamacpp-bridge`) (`openspec validate modelforge --strict`).
 - Planes: `plans/PLAN-001-ARCHIVED.md`, `plans/PLAN-002-ARCHIVED.md` y `plans/PLAN-003-ARCHIVED.md` (todos completados).
-- Docs: `docs/modelforge.md`, `docs/native-import.md`, `docs/llamacpp-bridge.md`, `docs/coder-models-evaluation.md` y `docs/agentes-locales-podcast.md`.
-- `llm-gateway` (proxy OpenAI-compatible, `127.0.0.1:4010`) **activo**; **5 rutas** locales con failover a OpenRouter (ver sección de agentes locales).
+- Docs: `docs/modelforge.md`, `docs/native-import.md`, `docs/llamacpp-bridge.md`, `docs/coder-models-evaluation.md`, `docs/agentes-locales-podcast.md` y `docs/oneshot-models-evaluation.md`.
+- `llm-gateway` (proxy OpenAI-compatible, `127.0.0.1:4010`) **activo**; **7 rutas** locales con failover a OpenRouter (ver sección de agentes locales).
 - Limitación conocida: Ollama en Linux no tiene MLX → el import nativo de safetensors da `503 MLX runtime is not available`; en Linux usar `--backend llama.cpp`. En macOS la vía nativa sigue válida. Documentado en `docs/native-import.md` y `docs/llamacpp-bridge.md`.
 
 ## Evaluación de modelos de código locales (2026-11-10)
@@ -76,7 +86,8 @@
 
 ## Tarea pendiente
 
-- Ninguna.
+- PR de los docs + `plans/PLAN-005.md` (issue #38) y cerrar #38.
+- PR del fix de Blazar (6.2, issue #36) en sesión limpia. Cerrar #36 + archivar PLAN-004.
 
 ## Notas de tooling
 
